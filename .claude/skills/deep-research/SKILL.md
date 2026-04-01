@@ -63,7 +63,7 @@ For each important dimension identified, conduct targeted research:
 
 1. **Specific Queries**: Search with precise keywords for each subtopic
 2. **Multiple Phrasings**: Try different keyword combinations and phrasings
-3. **Fetch Full Content**: Use `web_fetch` to read important sources in full, not just snippets
+3. **Fetch Full Content**: Use `link_analyze` to read important sources in full, not just snippets
 4. **Follow References**: When sources mention other important resources, search for those too
 
 Example:
@@ -130,9 +130,9 @@ Before proceeding to content generation, verify:
 "[topic] recent developments"
 ```
 
-### When to Use web_fetch
+### When to Use link_analyze
 
-Use `web_fetch` to read full content when:
+Use `link_analyze` to read full content when:
 - A search result looks highly relevant and authoritative
 - You need detailed information beyond the snippet
 - The source contains data, case studies, or expert analysis
@@ -175,3 +175,8 @@ After completing research, you should have:
 5. Current trends and relevant context
 
 **Only then proceed to content generation**, using the gathered information to create high-quality, well-informed content.
+
+## 调用实践
+必须阅读以下内容：
+- 最佳实践(iteration/best-practices.md): 最佳实践
+- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

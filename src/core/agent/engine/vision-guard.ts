@@ -96,40 +96,6 @@ Actionable Details: (what a developer needs to debug/implement/fix/understand)
 }
 
 // ============================================================
-// 层级一: System Prompt 注入
-// ============================================================
-
-/** 要注入到主 Agent system prompt 中的图片处理规则 */
-const IMAGE_HANDLING_RULES = `
-## Image Handling Policy (MANDATORY)
-
-You MUST follow these rules for ANY image file (${[...IMAGE_EXTENSIONS].join(', ')}):
-
-1. **NEVER** read image files directly (Read tool is BLOCKED for images)
-2. **ALWAYS** use the vision-analyzer subagent:
-   Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at <file_path>")
-3. Use ONLY the text summary returned by vision-analyzer for your reasoning
-4. **Multiple images → analyze ALL at once**: When you need to analyze 2+ images, call Agent for each image in the SAME turn. Do NOT wait for one to finish before starting the next. Example:
-   Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at /path/img1.png")
-   Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at /path/img2.png")
-
-## Cached Image Analysis
-
-When conversation history contains "[图片: <path>]" followed by "[此前分析结果]: ...",
-the image has already been analyzed. Rules:
-
-**Use cache directly** (default): The cached result is sufficient for most follow-up questions.
-
-**Re-analyze** only when:
-- User explicitly says the previous analysis is wrong or asks to "look again"
-- User asks about a completely different aspect not covered by the cached result
-- The cached result is clearly incomplete or corrupted
-
-To re-analyze, call vision-analyzer with the specific focus:
-Agent(subagent_type: "vision-analyzer", prompt: "Re-analyze the image at <path>. Focus on: <specific question>")
-`
-
-// ============================================================
 // 层级二: PreToolUse Hook - 拦截 Read tool 读图片
 // ============================================================
 
@@ -169,9 +135,11 @@ const blockImageReadHook: HookCallback = async (
     decision: 'block',
     reason:
       `⚠️ BLOCKED: Cannot read image file "${filePath}" directly with Read tool. ` +
-      `Image files consume 10,000+ tokens of context as base64 data, degrading your reasoning ability. ` +
-      `\n\nUse the vision-analyzer subagent instead:\n` +
-      `Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at ${filePath}")`,
+      `Image files consume 10,000+ tokens of context as base64 data.\n\n` +
+      `Choose based on your intent:\n` +
+      `- **To SEND/DISPLAY the image to the user**: Do NOT read it. Simply output \`![image](${filePath})\` in your response. The system will automatically upload and deliver it.\n` +
+      `- **To ANALYZE/UNDERSTAND the image content**: Use the vision-analyzer subagent:\n` +
+      `  Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at ${filePath}")`,
   }
 }
 
@@ -204,7 +172,8 @@ async function imageGuardCanUseTool(
         behavior: 'deny',
         message:
           `Image file "${filePath}" blocked. ` +
-          `Use vision-analyzer subagent: Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at ${filePath}")`,
+          `To SEND/DISPLAY: just output \`![image](${filePath})\` in your response (no need to read). ` +
+          `To ANALYZE: use Agent(subagent_type: "vision-analyzer", prompt: "Analyze the image at ${filePath}")`,
       }
     }
   }
@@ -218,7 +187,8 @@ async function imageGuardCanUseTool(
         behavior: 'deny',
         message:
           `Reading image files via bash is blocked to protect context window. ` +
-          `Use vision-analyzer subagent instead.`,
+          `To SEND/DISPLAY: just output \`![image](path)\` in your response (no need to read). ` +
+          `To ANALYZE: use vision-analyzer subagent.`,
       }
     }
   }
@@ -242,8 +212,6 @@ export interface VisionGuardConfig {
   }
   /** canUseTool 回调, 传入 options.canUseTool */
   canUseTool: typeof imageGuardCanUseTool
-  /** 需要追加到 system prompt 的图片处理规则 */
-  systemPromptRules: string
 }
 
 /**
@@ -264,14 +232,12 @@ export function getVisionGuardConfig(): VisionGuardConfig {
       ],
     },
     canUseTool: imageGuardCanUseTool,
-    systemPromptRules: IMAGE_HANDLING_RULES,
   }
 }
 
 // 同时导出各组件, 方便单独使用
 export {
   VISION_AGENT_DEFINITION,
-  IMAGE_HANDLING_RULES,
   blockImageReadHook,
   imageGuardCanUseTool,
   isImagePath,

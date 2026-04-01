@@ -1202,7 +1202,8 @@ export class FeishuService implements FeishuConnection {
     const pathPattern = new RegExp(
       `(?:https?|file):\\/\\/[^\\s\\)"'<>]+\\.(?:${IMG_EXT})(?:\\?[^\\s\\)"'<>]*)?` +
       `|[a-zA-Z]:\\\\[^\\s\\)"'<>]+\\.(?:${IMG_EXT})` +
-      `|\\.{0,2}[\\\\\/][^\\s\\)"'<>]+\\.(?:${IMG_EXT})`,
+      `|\\.{0,2}[\\\\\/][^\\s\\)"'<>]+\\.(?:${IMG_EXT})` +
+      `|[a-zA-Z][a-zA-Z0-9_-]*[\\\\/][^\\s\\)"'<>]+\\.(?:${IMG_EXT})`,
       'gi'
     );
 
@@ -1274,9 +1275,39 @@ export class FeishuService implements FeishuConnection {
     } else if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
       return this.uploadImageFromUrl(imagePath);
     } else {
-      const resolved = isAbsolute(imagePath) ? imagePath : resolve(process.cwd(), imagePath);
-      return this.uploadImage(resolved);
+      // 多路径搜索：依次在可能的位置查找文件
+      const resolvedPath = this.findImageFile(imagePath);
+      if (!resolvedPath) {
+        return { success: false, error: `File not found in any search path: ${imagePath}` };
+      }
+      return this.uploadImage(resolvedPath);
     }
+  }
+
+  /**
+   * 在多个候选目录中搜索图片文件
+   * 搜索顺序：
+   *   1. 绝对路径直接检查
+   *   2. cwd 相对路径
+   *   3. data/ 目录拼接
+   *   4. data/temp/ 目录按文件名查找
+   */
+  private findImageFile(imagePath: string): string | null {
+    // 绝对路径：直接检查
+    if (isAbsolute(imagePath)) {
+      return existsSync(imagePath) ? imagePath : null;
+    }
+
+    // 相对路径：基于 cwd 拼接
+    const cwd = process.cwd();
+    const resolved = resolve(cwd, imagePath);
+    if (existsSync(resolved)) {
+      console.log(`📁 图片文件找到: ${imagePath} → ${resolved}`);
+      return resolved;
+    }
+
+    console.warn(`⚠️ 图片文件未找到: ${imagePath}，已搜索 cwd=${cwd}`);
+    return null;
   }
 
   /**

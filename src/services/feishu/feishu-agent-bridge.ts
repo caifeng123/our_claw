@@ -917,6 +917,17 @@ ${originalContent}
             await this.sendMessageWithAIFix(message.chatId, fullResponse, replyMessageId, message.threadId);
           }
         } else {
+          // 🔧 修复：完成前将本地图片路径/URL 转为飞书 image_key
+          // 流式过程中图片显示为"图片加载中..."占位符，此处统一处理后再渲染最终卡片
+          const processed = await this.feishuService.processContentWithImages(fullResponse);
+          if (processed.imageKeys.length > 0) {
+            renderer.replaceContentText(processed.processedText);
+            fullResponse = processed.processedText;
+          }
+          if (processed.errors.length > 0) {
+            console.warn('⚠️ 部分图片上传失败:', processed.errors);
+          }
+
           await renderer.onComplete();
 
           if (renderer.isContentTruncated() && fullResponse) {

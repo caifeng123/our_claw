@@ -1,9 +1,6 @@
 import type { Module, QueryContext } from '../module-system/types.js'
 import type { EventHandlers } from '../agent/types/agent.js'
-import {
-  getVisionGuardConfig,
-  IMAGE_HANDLING_RULES,
-} from '../agent/engine/vision-guard.js'
+import { getVisionGuardConfig } from '../agent/engine/vision-guard.js'
 
 export function createVisionGuardModule(): Module {
   const guard = getVisionGuardConfig()
@@ -17,6 +14,5 @@ export function createVisionGuardModule(): Module {
     agents: guard.agents,
     canUseTool: guard.canUseTool,
     allowedTools: guard.additionalAllowedTools,
-    systemPromptExtension: IMAGE_HANDLING_RULES,
   }
 }

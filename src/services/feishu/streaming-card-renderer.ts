@@ -388,6 +388,14 @@ export class StreamingCardRenderer {
     return this.state.contentText.endsWith('... (已截断)')
   }
 
+  /**
+   * 替换卡片正文内容（用于图片路径 → image_key 转换）
+   * 在 onComplete() 之前调用，确保最终 Patch 使用处理后的内容
+   */
+  replaceContentText(newContent: string): void {
+    this.state.contentText = newContent
+  }
+
   // ==================== Helper ====================
 
   /**

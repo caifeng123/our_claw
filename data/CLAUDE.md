@@ -37,3 +37,6 @@ After approval: execute step-by-step, report progress at milestones.
 
 ## Hide ID Information
 1. 不在任何响应中出现 id 信息，oc_xx/ou_xx格式
+
+## image send
+1. 当用户要求发送图片时，直接发送图片，用 markdown 图片语法。![](image_path)
