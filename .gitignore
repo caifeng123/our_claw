@@ -1,0 +1,43 @@
+# 重启状态文件
+.restart-state.json
+
+# dependencies
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+data/*
+!data/.gitkeep
+!data/conversations/.gitkeep
+!data/README.md
+!data/CLAUDE.md
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env*
+!.env.example
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Skill 自迭代 — 运行时 trace 日志
+.claude/skills/*/iteration/traces/

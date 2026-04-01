@@ -1,0 +1,38 @@
+{
+  "name": "cf_claw",
+  "version": "0.3.0",
+  "description": "A single-user AI Agent system based on Claude Agent SDK with layered memory and Feishu integration",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc src/index.ts --outdir dist",
+    "launcher": "tsx scripts/launcher.ts",
+    "launcher:debug": "DEBUG=1 tsx scripts/launcher.ts",
+    "memory": "tsx scripts/memory-cli.ts",
+    "memory:list": "tsx scripts/memory-cli.ts list",
+    "memory:search": "tsx scripts/memory-cli.ts search",
+    "memory:stats": "tsx scripts/memory-cli.ts stats",
+    "memory:dump": "tsx scripts/memory-cli.ts dump"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "@types/turndown": "^5.0.5",
+    "@types/jsdom": "^21.1.7"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.79",
+    "@larksuiteoapi/node-sdk": "^1.60.0",
+    "cron-parser": "^4.9.0",
+    "dotenv": "^17.3.1",
+    "hono": "^4.12.3",
+    "mime": "^4.1.0",
+    "zod": "^4.3.6",
+    "jsdom": "^26.1.0",
+    "@mozilla/readability": "^0.5.0",
+    "turndown": "^7.2.0"
+  }
+}
