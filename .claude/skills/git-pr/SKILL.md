@@ -160,3 +160,8 @@ Return to user:
 | No changes | Inform user, stop |
 | Amend failed | Keep placeholder commit, continue push |
 | PR edit failed | Return link + summary, suggest manual paste |
+
+## 调用实践
+必须阅读以下内容：
+- 最佳实践(iteration/best-practices.md): 最佳实践
+- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

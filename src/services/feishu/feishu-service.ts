@@ -147,6 +147,10 @@ export class FeishuService implements FeishuConnection {
         'im.message.receive_v1': async (data) => {
           await this.handleMessage(data);
         },
+        // 静默处理：飞书会推送这些事件，不注册会持续打 warn
+        'im.message.message_read_v1': async () => {},
+        'im.message.reaction.created_v1': async () => {},
+        'im.message.reaction.deleted_v1': async () => {},
       });
 
       // 初始化 WebSocket 客户端

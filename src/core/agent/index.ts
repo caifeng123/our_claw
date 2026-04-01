@@ -103,9 +103,6 @@ export class AgentEngine {
     // ─── 注册所有 Module ───
     this.registerModules()
 
-    // ─── 确保内置 CronJob 存在 ───
-    this.ensureSelfIterationCronJob()
-
     console.log('🤖 Agent引擎 V6.0 初始化完成（模块化架构 + Resume + Skill 自迭代）')
   }
 
@@ -141,26 +138,6 @@ export class AgentEngine {
     this.toolManager.registerTools(createMemoryTools(this.memoryDb))
     this.toolManager.registerTools(createCronjobTools(this.cronScheduler))
     this.toolManager.registerTools(createLinkAnalyzeTools())
-  }
-
-  /**
-   * 确保 Skill 自迭代 CronJob 存在（幂等）
-   */
-  private ensureSelfIterationCronJob(): void {
-    const store = this.cronScheduler.getStore()
-    const existing = store.listJobs().find((j) => j.name === '__skill_self_iteration__')
-    if (existing) return
-
-    store.createJob({
-      name: '__skill_self_iteration__',
-      cron: '0 0 * * *',
-      taskType: 'self_iteration',
-      taskConfig: { type: 'self_iteration', skills: 'all' },
-      notifyChatId: '',
-      enabled: true,
-    })
-
-    console.log('⏰ [AgentEngine] Skill self-iteration CronJob registered (0 0 * * *)')
   }
 
   // ==================== 消息处理 ====================

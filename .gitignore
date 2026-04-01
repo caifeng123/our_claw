@@ -18,6 +18,7 @@ data/*
 !data/conversations/.gitkeep
 !data/README.md
 !data/CLAUDE.md
+!data/cronjobs.json
 
 # logs
 logs
