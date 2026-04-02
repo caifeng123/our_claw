@@ -11,7 +11,9 @@
       "notifyChatId": "oc_dbd1e613d846dd602c27b245577a8f61",
       "enabled": true,
       "id": "70c06681-48fe-43ad-a1a2-ccc5ba1ee81a",
-      "createdAt": 1775022393899
+      "createdAt": 1775022393899,
+      "lastRunAt": 1775131538871,
+      "lastRunStatus": "success"
     }
   ]
 }

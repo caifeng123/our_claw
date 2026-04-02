@@ -1,5 +1,24 @@
 import type { AgentResponse, EventHandlers } from '../types/agent'
 
+export interface TextContent {
+  type: 'text'
+  text: string
+}
+
+export interface ImageContent {
+  type: 'image_url'
+  image_url: { url: string }
+}
+
+export type ContentPart = TextContent | ImageContent
+
+export interface LLMQueryOptions {
+  thinking?: boolean
+  json_format?: boolean
+  model?: string
+  baseUrl?: string
+}
+
 export class LlmEngine {
   private config: {
     baseUrl: string
@@ -31,29 +50,28 @@ export class LlmEngine {
    */
   public async executeOnceLLMQuery(
     systemPrompt: string,
-    userPrompt: string,
-    {
-      thinking = false, // 深度思考
-      json_format = false, // json 格式输出
-    } = {}
+    userPrompt: string | ContentPart[],
+    options: LLMQueryOptions = {},
   ): Promise<string> {
     const startTime = Date.now()
     try {
-      const config = this.config
-      const response = await fetch(config.baseUrl, {
+      const effectiveModel = options.model || this.config.model || process.env.LLM_MODEL || ''
+      const effectiveBaseUrl = options.baseUrl || this.config.baseUrl || process.env.LLM_BASE_URL || ''
+
+      const response = await fetch(effectiveBaseUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.apiKey}`,
+          Authorization: `Bearer ${this.config.apiKey}`,
         },
         body: JSON.stringify({
-          model: config.model,
+          model: effectiveModel,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          ...(thinking && { thinking: { type: 'enabled' } }),
-          ...(json_format && { response_format: { type: 'json_object' } }),
+          ...(options.thinking && { thinking: { type: 'enabled' } }),
+          ...(options.json_format && { response_format: { type: 'json_object' } }),
         }),
       })
       if (!response.ok) {

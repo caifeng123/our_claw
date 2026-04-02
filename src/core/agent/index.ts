@@ -11,6 +11,7 @@
  */
 
 import { ClaudeEngine } from './engine/claude-engine.js'
+import { LlmEngine } from './engine/llm-engine.js'
 import { ToolManager } from './engine/tool-manager.js'
 import { SessionManager } from './engine/session-manager.js'
 import { StreamHandler } from './handlers/stream-handler.js'
@@ -29,7 +30,8 @@ import { TraceCollector } from '../self-iteration/trace-collector.js'
 import { ModuleRegistry } from '../module-system/index.js'
 import type { QueryContext } from '../module-system/types.js'
 import {
-  createVisionGuardModule,
+
+  createImagePipelineTools,
   createSelfIterationModule,
   createMemoryModule,
   createTraceModule,
@@ -52,6 +54,7 @@ interface SimpleMessage {
 
 export class AgentEngine {
   private claudeEngine: ClaudeEngine
+  private llmEngine: LlmEngine
   private toolManager: ToolManager
   private sessionManager: SessionManager
   private streamHandler: StreamHandler
@@ -82,6 +85,9 @@ export class AgentEngine {
     // ─── Claude 引擎层 ───
     this.claudeEngine = new ClaudeEngine()
 
+    // ─── LLM 引擎层（用于图片分析等工具） ───
+    this.llmEngine = new LlmEngine()
+
     // ─── 会话管理器 ───
     this.sessionManager = new SessionManager(this.conversationStore)
     this.streamHandler = new StreamHandler()
@@ -98,6 +104,7 @@ export class AgentEngine {
     // ─── 工具层 ───
     this.toolManager = new ToolManager()
     this.registerBuiltinTools()
+    this.toolManager.registerTools(createImagePipelineTools(this.llmEngine))
     this.claudeEngine.toolManager = this.toolManager
 
     // ─── 注册所有 Module ───
@@ -112,7 +119,7 @@ export class AgentEngine {
   private registerModules(): void {
     this.registry
       .use(createFeishuTransportModule())
-      .use(createVisionGuardModule())
+
       .use(createSelfIterationModule())
       .use(createMemoryModule(this.memoryDb, this.conversationStore))
       .use(createBuiltinToolsModule(this.toolManager))

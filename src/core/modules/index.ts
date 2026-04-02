@@ -1,4 +1,4 @@
-export { createVisionGuardModule } from './vision-guard.module.js'
+export { createImagePipelineTools } from './image-pipeline.module.js'
 export { createSelfIterationModule } from './self-iteration.module.js'
 export { createMemoryModule } from './memory.module.js'
 export { createTraceModule } from './trace.module.js'

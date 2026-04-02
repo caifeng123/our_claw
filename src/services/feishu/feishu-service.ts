@@ -481,14 +481,11 @@ export class FeishuService implements FeishuConnection {
               case 'img':
                 if (segment.image_key) {
                   imageKeys.push(segment.image_key);
-                  // 使用占位符，bridge 层下载后替换为实际路径
-                  paragraphTexts.push(`![image]({{FILE:${segment.image_key}}})`);
                 }
                 break;
               case 'media':
                 if (segment.file_key) {
                   fileKeys.push(segment.file_key);
-                  paragraphTexts.push(`{{FILE:${segment.file_key}}}`);
                 }
                 break;
               case 'emotion':
@@ -525,7 +522,7 @@ export class FeishuService implements FeishuConnection {
         const imageKey = parsed.image_key;
         if (imageKey) {
           return {
-            text: `{{FILE:${imageKey}}}`,
+            text: '',
             imageKeys: [imageKey],
             fileKeys: parsed.file_key ? [parsed.file_key] : undefined,
           };
@@ -538,7 +535,7 @@ export class FeishuService implements FeishuConnection {
         const fileName = parsed.file_name || 'unknown_file';
         if (fileKey) {
           return {
-            text: `[文件: ${fileName}] {{FILE:${fileKey}}}`,
+            text: `[文件: ${fileName}]`,
             fileKeys: [fileKey],
           };
         }
@@ -1348,7 +1345,6 @@ export class FeishuService implements FeishuConnection {
   async downloadFile(
     messageId: string,
     fileKey: string,
-    filePrefix: string,
     type: 'image' | 'file',
     targetDir: string,
   ): Promise<string> {
@@ -1376,7 +1372,7 @@ export class FeishuService implements FeishuConnection {
         },
       });
 
-      const fileName = `${filePrefix || fileKey}${getExtFromContentType(response.headers['Content-Type'] || response.headers['content-type'] || '')}`;
+      const fileName = `${fileKey}${getExtFromContentType(response.headers['Content-Type'] || response.headers['content-type'] || '')}`;
       const filePath = join(imageDir, fileName);
 
       await response.writeFile(filePath);

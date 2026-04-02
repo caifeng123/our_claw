@@ -133,6 +133,8 @@ export class StreamingCardRenderer {
   /** 当前 thinking 步骤的 ID */
   private currentThinkingStepId: string | null = null
 
+  private imageBlocks: Array<{ img_key: string; alt: string }> = []
+
   /**
    * tool_use_id → step 映射（递归支持）
    * 用于将 Sub-Agent 内部工具调用通过 parentToolUseId 归类到对应的 Agent 步骤
@@ -170,6 +172,10 @@ export class StreamingCardRenderer {
   /** 设置完成时要 @ 的用户 */
   setMentionUser(openId: string): void {
     this.mentionUserId = openId
+  }
+
+  public registerImage(imageKey: string, alt: string): void {
+    this.imageBlocks.push({ img_key: imageKey, alt })
   }
 
   /** 初始化：立即创建初始卡片 */
@@ -489,6 +495,15 @@ export class StreamingCardRenderer {
         tag: 'markdown',
         content,
         text_size: 'normal',
+      })
+    }
+
+    // ====== 3.5 图片元素（由 send_image 工具注册） ======
+    for (const img of this.imageBlocks) {
+      elements.push({
+        tag: 'img',
+        img_key: img.img_key,
+        alt: { tag: 'plain_text', content: img.alt },
       })
     }
 
