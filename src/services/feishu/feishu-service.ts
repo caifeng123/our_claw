@@ -254,6 +254,30 @@ export class FeishuService implements FeishuConnection {
     }
   }
 
+  /**
+   * 通过 open_id 发送个人消息（用于定时任务私聊推送）
+   */
+  async sendMessageByOpenId(openId: string, text: string): Promise<void> {
+    if (!this.client) {
+      console.warn('Feishu client not initialized, skipping message send');
+      return;
+    }
+
+    try {
+      await this.client.im.message.create({
+        params: { receive_id_type: 'open_id' },
+        data: {
+          receive_id: openId,
+          msg_type: 'text',
+          content: JSON.stringify({ text }),
+        },
+      });
+    } catch (error) {
+      console.error(`Failed to send message to open_id ${openId}:`, error);
+      throw error;
+    }
+  }
+
   async sendTyping(chatId: string, isTyping: boolean, threadId?: string): Promise<void> {
     if (!this.client) return;
     // [FIX] 使用 threadId-aware key，避免话题群多 thread 共享 chatId 时 reaction 互相覆盖

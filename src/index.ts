@@ -18,6 +18,7 @@ import memoryRouter from './routes/memory.js'
 import { getFeishuConfig, validateFeishuConfig } from './config/feishu.js'
 import { startDefaultFeishuBridge, stopDefaultFeishuBridge } from './services/feishu/feishu-agent-bridge.js'
 import { agentEngine } from './core/agent/index.js'
+import { getDefaultFeishuAgentBridge } from './services/feishu/feishu-agent-bridge.js'
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000
 
@@ -96,6 +97,33 @@ async function gracefulShutdown(signal: string): Promise<void> {
 async function main(): Promise<void> {
   // 1. 飞书服务初始化
   await initializeFeishuService()
+
+  // 1.5 注入 CronExecutor 的 AgentBridge 和 FeishuBridge
+  const cronExecutor = agentEngine.getCronScheduler().getExecutor()
+  cronExecutor.setAgentBridge({
+    createSession: (config) => agentEngine.createSession(config),
+    sendMessage: (sessionId, message, userId, sessionContext) =>
+      agentEngine.sendMessage(sessionId, message, userId, sessionContext),
+    deleteSession: (sessionId) => agentEngine.deleteSession(sessionId),
+  })
+
+  const feishuBridge = getDefaultFeishuAgentBridge()
+  if (feishuBridge) {
+    cronExecutor.setFeishuBridge({
+      sendText: async (target, text) => {
+        if (target.startsWith('ou_')) {
+          // 个人消息：通过飞书 open_id 发送
+          await feishuBridge.sendMessageByOpenId(target, text)
+        } else {
+          // 群聊消息：通过 chat_id 发送
+          await feishuBridge.sendMessageToChat(target, text)
+        }
+      },
+    })
+    console.log('✅ CronExecutor bridges injected (Agent + Feishu)')
+  } else {
+    console.warn('⚠️ FeishuBridge not available, feishu_notify tasks will fail')
+  }
 
   // 2. [MODULE-SYSTEM] 模块异步初始化（onInit → onReady）
   await agentEngine.initModules()

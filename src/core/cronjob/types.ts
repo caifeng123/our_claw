@@ -75,6 +75,7 @@ export interface CronJob {
 
   // ── 配置层（可后续修改）──
   enabled: boolean
+  once: boolean           // 单次任务：执行后自动禁用
   missPolicy: MissPolicy
   maxRetries: number
   retryDelayMs: number
@@ -99,6 +100,7 @@ export interface CreateJobParams {
   taskConfig: TaskConfig
   target: NotifyTarget
   enabled?: boolean
+  once?: boolean
   missPolicy?: MissPolicy
   maxRetries?: number
   retryDelayMs?: number
@@ -111,7 +113,7 @@ export interface CreateJobParams {
 export type UpdateJobParams = Partial<
   Pick<CronJob,
     | 'name' | 'cron' | 'taskConfig' | 'target'
-    | 'enabled' | 'missPolicy' | 'maxRetries'
+    | 'enabled' | 'once' | 'missPolicy' | 'maxRetries'
     | 'retryDelayMs' | 'timeoutMs'
     // 运行层字段也允许系统内部更新
     | 'lastRunAt' | 'lastRunStatus' | 'nextRunAt' | 'retryCount'

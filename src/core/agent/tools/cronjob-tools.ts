@@ -69,14 +69,24 @@ export function createCronjobTools(scheduler: CronScheduler): RegisteredTool[] {
 - 用户说"发给我/私聊发我" → 传该用户的 open_id（ou_ 开头）
 - 用户指定了其他人 → 需要先确认目标用户的 open_id
 
-## cron 表达式
-格式：分 时 日 月 周几（Asia/Shanghai 时区）
+## 单次 vs 周期任务
+- 用户说"5分钟后""明天下午3点""下周一提醒我" → **单次任务**，设置 once=true
+- 用户说"每天""每周""每小时" → **周期任务**，once=false（默认）
+
+单次任务执行成功后会自动禁用，不会重复触发。
+
+## cron 表达式（⚠️ 北京时间）
+**所有 cron 中的"时"字段都是北京时间（Asia/Shanghai, UTC+8），不是 UTC！**
+用户说"早上9点" → 小时填 9；用户说"下午3点" → 小时填 15。
+如果你从 get_current_time 获取到当前时间，请确认使用的是北京时间小时数。
+
+格式：分 时 日 月 周几
 常用：
-  "0 9 * * *"     每天 9:00
-  "0 9 * * 1-5"   工作日 9:00
-  "0 9,18 * * *"  每天 9:00 和 18:00
+  "0 9 * * *"     每天北京时间 9:00
+  "0 9 * * 1-5"   工作日北京时间 9:00
+  "0 9,18 * * *"  每天北京时间 9:00 和 18:00
   "*/30 * * * *"  每 30 分钟
-  "0 0 * * 1"     每周一 0:00
+  "0 0 * * 1"     每周一北京时间 0:00
 预设：@hourly @daily @weekly @monthly
 
 ## messageTemplate 变量（feishu_notify 专用）
@@ -88,13 +98,16 @@ export function createCronjobTools(scheduler: CronScheduler): RegisteredTool[] {
         '任务名称，简洁有辨识度，如"每日科技早报""工作日站会提醒"'
       ),
       cron: z.string().describe(
-        'cron 表达式或预设（@daily 等），时区为 Asia/Shanghai'
+        'cron 表达式或预设（@daily 等）。⚠️ 时/分必须使用北京时间（Asia/Shanghai），不要用 UTC'
       ),
       taskType: z.enum(['agent_prompt', 'feishu_notify', 'custom_script']).describe(
         '任务类型'
       ),
       target: z.string().describe(
         '结果发送目标。群聊传 chat_id（oc_ 开头），个人传 open_id（ou_ 开头）'
+      ),
+      once: z.boolean().optional().describe(
+        '是否为单次任务。用户说"X分钟后""明天X点""下周一"等一次性场景时设为 true，执行后自动禁用。默认 false（周期任务）'
       ),
 
       // agent_prompt 专用
@@ -152,6 +165,7 @@ export function createCronjobTools(scheduler: CronScheduler): RegisteredTool[] {
           taskType,
           taskConfig,
           target: args.target,
+          once: args.once ?? false,
           missPolicy: (args.missPolicy as MissPolicy) || 'run_once',
           maxRetries: args.maxRetries ?? 3,
           timeoutMs,

@@ -15,18 +15,11 @@ remote-computer-control/
 ├── references/
 │   └── live_scenarios.md            # 直播场景专用流程（开播/下播）
 └── scripts/
-    ├── start.sh                     # 环境初始化（Go 依赖安装）
-    ├── task_runner.js               # 任务编排器 — 图片处理 + Go 调用
+    ├── start.sh                     # 环境初始化（Go 依赖检查 + 增量编译）
     ├── task.go                      # 远程执行器 — 调用 Lumi CUA SDK
-    ├── upload.js                    # CDN 图片上传工具
     ├── go.mod
     └── go.sum
 ```
-
-运行时产出路径：
-- `<PROJECT_ROOT>/data/temp/TASK_LIST.md` — 当次任务列表
-- `<PROJECT_ROOT>/data/temp/final_screenshot.png` — 执行完成后的桌面截图
-- `<PROJECT_ROOT>/data/temp/last_live_url.txt` — 上次使用的直播地址（自动记忆）
 
 ---
 
@@ -44,94 +37,111 @@ remote-computer-control/
 
 ## 标准执行流程
 
-**严格按顺序执行以下 6 步，不可跳步：**
-
-### Step 1 — 环境初始化
+### 1. 环境初始化
 
 ```bash
 bash $SKILL_DIR/scripts/start.sh
 ```
 
-确保 Go 依赖就绪。仅首次执行或依赖变更时有实际开销。
+增量编译：仅依赖变更或源码变更时重新构建，静默成功。
 
-### Step 2 — 制定 TASK_LIST
+### 2. 编写目标级 Prompt 并执行
 
-根据用户需求，将目标拆解为**远程桌面可执行的原子步骤列表**（纯文本）。
+**核心原则：写目标，不写操作步骤。**
 
-#### 编写规则
+CUA Planner 自身具备将目标拆解为鼠标/键盘操作的能力，Claude 只需描述"最终要达到什么状态"，不要写"点击哪里、输入什么"这种操作级指令。
+
+#### Prompt 编写规则
 
 | 规则 | 说明 |
 |------|------|
-| **禁止截图指令** | TASK_LIST 中不允许出现任何"截图"、"截屏"、"screenshot"字样。截图由 `task.go` 在任务结束后自动完成 |
-| **每步单一动作** | 一个步骤只做一件事：点击、输入、打开、等待… |
-| **明确定位元素** | 用可见文字、坐标区域或 UI 层级描述目标元素，避免模糊指代 |
-| **包含等待与验证** | 页面加载、动画等需要显式等待（如 "等待页面加载完成"） |
-| **图片使用占位符** | 需要图片的位置写 `{IMAGE_URL}`，`task_runner.js` 会自动查找最新图片、上传 CDN 并替换 |
+| **目标导向** | 描述期望的最终状态，而非操作步骤。CUA Planner 会自行规划具体操作 |
+| **禁止截图指令** | Prompt 中不允许出现"截图"、"screenshot"字样。截图由 `task.go` 自动完成 |
+| **图片使用占位符** | 需要传递图片到远程沙箱的位置写 `{IMAGE_URL}`，由 `--images` 参数传入 CDN URL 替换 |
+| **关键约束前置** | 如有特定要求（语言、区域、版本），在 Prompt 开头明确说明 |
 
 #### 示例
 
-**纯文本任务：**
+**好的 Prompt（目标级）：**
 ```
-1: 打开Chrome浏览器，访问 https://github.com
-2: 等待页面加载完成
-3: 点击页面顶部搜索框
-4: 输入 "OpenClaw" 并按回车
-5: 在搜索结果中点击第一个仓库链接
-6: 等待仓库页面加载完成
+打开 Chrome 浏览器，访问 GitHub，搜索 "OpenClaw" 仓库并进入第一个搜索结果的仓库页面。
 ```
 
-**含图片任务：**
+**差的 Prompt（操作级 ❌）：**
 ```
-1: 打开Chrome浏览器，访问 https://example.com/upload
-2: 等待页面加载完成
-3: 点击"上传图片"按钮
-4: 在文件选择框中输入图片路径 {IMAGE_URL}
-5: 点击"确认上传"按钮
-6: 等待上传进度条完成
-```
-
-#### 反面示例（❌ 禁止）
-
-```
-# 以下写法均不允许：
-1: 打开Chrome浏览器，访问知乎 https://www.zhihu.com 进行截图
-2: 点击搜索框，输入"汕头"进行截图
-3: 截图查看当前情况
+1: 点击桌面Chrome图标
+2: 在地址栏输入 https://github.com
+3: 按回车
+4: 找到搜索框并点击
+5: 输入 OpenClaw
+6: 按回车
+7: 点击第一个结果
 ```
 
-### Step 3 — 写入任务文件
+#### 含图片的 Prompt
 
-将 TASK_LIST 写入 `<PROJECT_ROOT>/data/temp/TASK_LIST.md`。
+当用户发送了图片且需要传递到远程沙箱时：
 
-### Step 4 — 执行任务
+```
+打开 Chrome 访问 https://example.com/upload ，将图片 {IMAGE_URL} 上传到页面中。
+```
+
+执行时 `task.go` 会将用户图片上传 CDN 并替换 `{IMAGE_URL}` 为实际 URL。
+
+### 3. 调用 Go 二进制执行
 
 ```bash
-node $SKILL_DIR/scripts/task_runner.js <PROJECT_ROOT>/data/temp/TASK_LIST.md
+$SKILL_DIR/scripts/task --prompt "目标级Prompt" --screenshot-dir "$PROJECT_ROOT/data/temp"
 ```
 
-执行器内部流程：
-1. 读取 TASK_LIST
-2. 若包含 `{IMAGE_URL}` → 自动从 `data/lark/images/` 查找最新图片 → 上传 CDN → 替换占位符
-3. 调用 `go run task.go` 将任务发送到远程沙箱
-4. 通过 Lumi CUA SDK 流式接收执行过程消息
-5. 执行完成后自动保存桌面截图到 `data/temp/final_screenshot.png`
+含图片时追加 `--images` 参数：
+```bash
+$SKILL_DIR/scripts/task --prompt "Prompt含{IMAGE_URL}" --images "/path/to/image.png" --screenshot-dir "$PROJECT_ROOT/data/temp"
+```
 
-### Step 5 — 结果验证与重试
+**Go 二进制输出 JSON 到 stdout：**
+```json
+{
+  "success": true,
+  "screenshot": "/abs/path/to/final_screenshot.png",
+  "image_urls": ["https://cdn.example.com/uploaded.png"],
+  "duration_sec": 45.2,
+  "steps_executed": 8,
+  "error": null
+}
+```
 
-检查 `<PROJECT_ROOT>/data/temp/final_screenshot.png`：
+### 4. 结果验证 — 用 Read 工具看截图
 
-- **符合预期** → 进入 Step 6
-- **不符合预期** → 分析失败原因，回到 **Step 2** 重新规划 TASK_LIST
-- **判定无法完成** → 向用户说明原因并附上当前截图
-- **最大重试次数**：3 次（含首次执行）。超过后停止并报告
-
-### Step 6 — 发送结果截图
-
-**必须**调用 `/image-send` skill，将截图发送给用户：
+**直接用 `Read` 工具读取截图文件，Claude 原生多模态能力即可看到画面内容。**
 
 ```
-![截图](<PROJECT_ROOT>/data/temp/final_screenshot.png)
+Read: <screenshot_path>
 ```
+
+验证逻辑：
+
+| JSON `success` | 截图判断 | 处理 |
+|---|---|---|
+| `false` | 不需要看截图 | 执行出错（沙箱故障/超时），直接向用户报告 `error` 内容 |
+| `true` | **必须看截图** | `success:true` 仅代表"执行完成没崩溃"，不代表目标达成 |
+
+**当 `success: true` 时，对比截图与用户原始意图：**
+
+- **截图符合用户意图** → 进入步骤 5 发送截图
+- **截图不符合用户意图** → 分析偏差原因，优化 Prompt 重试（回到步骤 2，≤3 次）
+- **判定无法完成** → 发送截图 + 文字说明原因
+
+> **为什么用 `Read` 而不用 `analyze_image`？**
+> Claude 本身是多模态模型，可以直接看图。而且 Claude 已持有用户的原始请求上下文，天然具备"截图是否匹配意图"的判断能力。用 `analyze_image` 反而多一次 LLM 调用、多一层上下文传递，得不偿失。
+
+### 5. 发送截图给用户
+
+```
+send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
+```
+
+`send_image` 工具会自动上传到飞书并注入消息卡片，无需 CDN 中转。
 
 ---
 
@@ -139,18 +149,24 @@ node $SKILL_DIR/scripts/task_runner.js <PROJECT_ROOT>/data/temp/TASK_LIST.md
 
 | 场景 | 处理方式 |
 |------|---------|
+| `success: false` + `error` 非空 | 直接向用户报告错误原因，不截图验证 |
 | 沙箱不存在 / 连接失败 | 通知用户"远程沙箱不可用"，建议检查沙箱状态 |
-| Planner 服务繁忙 | 自动等待（5s 轮询），超过 60s 仍繁忙则通知用户 |
-| 任务执行超时（>300s） | 保存当前截图，通知用户任务超时，建议拆分为更小的步骤 |
-| 需要登录凭证 | 先发送当前截图给用户，请求用户提供登录信息，获取后继续 |
-| 图片上传全部失败 | 使用原始 TASK_LIST 继续执行（无图模式），并告知用户 |
-| `task.go` 编译/运行错误 | 检查 Go 环境，尝试重新执行 `start.sh`，仍失败则报告 |
+| Planner 服务繁忙 | Go 二进制内部自动等待轮询，超时后 JSON 返回错误 |
+| 任务执行超时（>300s） | JSON 返回 `success:false`，向用户报告超时 |
+| 需要登录凭证 | 发送截图给用户，请求用户提供登录信息，获取后继续 |
+| 图片 CDN 上传失败 | 使用不含图片的 Prompt 继续执行，告知用户图片未传入 |
+| `start.sh` / Go 编译失败 | 检查 Go 环境，报告具体错误 |
 
 ---
 
 ## 性能与限制
 
 - **单次任务超时**：300 秒（硬编码于 `task.go`）
-- **并发限制**：同一沙箱同时只能执行一个任务，后续任务需排队
-- **图片格式**：支持 `data/lark/images/` 下的任意图片格式，按文件名排序取最新批次
+- **并发限制**：同一沙箱同时只能执行一个任务
 - **远程 OS**：当前仅支持 Windows 沙箱（通过 Lumi CUA ECS 管理）
+- **截图验证**：Claude 直接读截图判断，零额外延迟
+
+## 调用实践
+必须阅读以下内容：
+- 最佳实践(iteration/best-practices.md): 最佳实践
+- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

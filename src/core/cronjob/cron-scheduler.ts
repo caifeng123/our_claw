@@ -192,6 +192,13 @@ export class CronScheduler {
         retryCount: 0,
       })
 
+      // 单次任务：执行成功后自动禁用
+      if (job.once) {
+        console.log(`⏰ [Scheduler] 单次任务已完成，自动禁用: ${job.name}`)
+        this.updateJobState(job, { enabled: false })
+        this.timerMap.remove(job.id)
+      }
+
       this.store.appendLog({
         jobId: job.id,
         jobName: job.name,

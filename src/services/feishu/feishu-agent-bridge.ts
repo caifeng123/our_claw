@@ -133,6 +133,13 @@ export class FeishuAgentBridge {
     await this.feishuService.sendMessage(chatId, text, replyMessageId, threadId);
   }
 
+  /**
+   * 通过 open_id 发送个人消息
+   */
+  async sendMessageByOpenId(openId: string, text: string): Promise<void> {
+    await this.feishuService.sendMessageByOpenId(openId, text);
+  }
+
   // ==================== NEW: 暴露文件发送能力 ====================
 
   /**

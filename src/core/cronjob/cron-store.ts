@@ -64,6 +64,7 @@ export class CronStore {
 
       // 配置层（用户可指定或使用默认值）
       enabled: params.enabled ?? true,
+      once: params.once ?? false,
       missPolicy: params.missPolicy ?? 'run_once',
       maxRetries: params.maxRetries ?? 3,
       retryDelayMs: params.retryDelayMs ?? 60_000,

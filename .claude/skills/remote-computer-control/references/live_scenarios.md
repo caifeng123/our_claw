@@ -8,29 +8,22 @@
 ### 执行流程
 
 1. **确认直播 URL**
-   - **首次使用或地址未记录时**：
-     - 询问用户是否使用默认地址：`https://www.tiktok.com/@funwave2000th/live`
-     - 若用户提供自定义 URL，使用用户提供的地址
-   - **已有记录地址时**：
-     - 询问用户："使用上次地址（{上次地址}）还是其他地址？"
-     - 提供快速选项：1) 使用上次地址 2) 输入新地址
-   - **记录最终确认的 URL** 到 `data/temp/last_live_url.txt` 以供后续使用
+   - 首次使用：询问用户是否使用默认地址 `https://www.tiktok.com/@funwave2000th/live`
+   - 已有记录：询问 "使用上次地址（{地址}）还是其他？"
+   - 记录最终 URL 到 `data/temp/last_live_url.txt`
 
-2. **生成 TASK_LIST**
-   ```
-   1: 打开PowerShell
-   2: 执行 C:\Users\ecs\Desktop\multi.bat {URL}
-   3: 等待5秒确认浏览器窗口已打开
-   ```
-
-3. **调用执行**
+2. **编写目标级 Prompt 并执行**
    ```bash
-   node $SKILL_DIR/scripts/task_runner.js <PROJECT_ROOT>/data/temp/TASK_LIST.md
+   $SKILL_DIR/scripts/task --prompt "打开 PowerShell，执行 C:\Users\ecs\Desktop\multi.bat {URL}，等待浏览器窗口打开并加载直播页面" --screenshot-dir "$PROJECT_ROOT/data/temp"
    ```
 
-4. **验证结果**
-   - 检查 `final_screenshot.png` 是否显示直播页面
-   - 确认浏览器窗口已正常打开且加载了目标 URL
+3. **验证**
+   用 `Read` 工具查看截图，确认直播页面已正常加载。
+
+4. **发送截图**
+   ```
+   send_image({ file_path: "<screenshot_path>", alt_text: "开播截图" })
+   ```
 
 ### 错误处理
 
@@ -38,7 +31,7 @@
 |---------|---------|
 | `multi.bat` 不存在 | 通知用户批处理文件缺失，请求确认路径 |
 | URL 无效或无法加载 | 发送截图给用户，请求确认正确的直播 URL |
-| 浏览器未启动 | 尝试直接通过 `start chrome {URL}` 打开，仍失败则报告 |
+| 浏览器未启动 | 优化 Prompt 使用 `start chrome {URL}` 重试 |
 
 ---
 
@@ -49,26 +42,23 @@
 
 ### 执行流程
 
-1. **生成 TASK_LIST**
-   ```
-   1: 打开PowerShell
-   2: 执行 C:\Users\ecs\Desktop\kill_chrome.bat
-   3: 等待3秒确认进程已终止
-   ```
-
-2. **调用执行**
+1. **编写目标级 Prompt 并执行**
    ```bash
-   node $SKILL_DIR/scripts/task_runner.js <PROJECT_ROOT>/data/temp/TASK_LIST.md
+   $SKILL_DIR/scripts/task --prompt "打开 PowerShell，执行 C:\Users\ecs\Desktop\kill_chrome.bat 终止所有 Chrome 进程。如果 bat 文件不存在，直接执行 taskkill /F /IM chrome.exe" --screenshot-dir "$PROJECT_ROOT/data/temp"
    ```
 
-3. **验证结果**
-   - 检查 `final_screenshot.png` 确认桌面上已无 Chrome 窗口
-   - 若仍有残留窗口，生成补充 TASK_LIST 使用 `taskkill /F /IM chrome.exe` 强制终止
+2. **验证**
+   用 `Read` 工具查看截图，确认桌面上已无 Chrome 窗口。
+
+3. **发送截图**
+   ```
+   send_image({ file_path: "<screenshot_path>", alt_text: "下播截图" })
+   ```
 
 ### 错误处理
 
 | 错误场景 | 处理方式 |
 |---------|---------|
-| `kill_chrome.bat` 不存在 | 改用 `taskkill /F /IM chrome.exe` 命令直接终止 |
+| `kill_chrome.bat` 不存在 | Prompt 已包含 fallback，自动使用 taskkill |
 | 无 Chrome 进程运行 | 通知用户"当前没有运行中的直播浏览器" |
-| 部分进程未终止 | 重试一次强制终止，仍失败则报告残留进程信息 |
+| 部分进程未终止 | 重试一次，仍失败则报告残留进程信息 |
