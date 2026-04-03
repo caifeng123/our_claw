@@ -10,8 +10,8 @@ Converts an article (URL or pasted text) into a beautifully designed infographic
 ## How It Works
 
 1. **Read the article** — Fetch URL via `link_analyze` or use provided text
-2. **Summarize into JSON** — Output a compact JSON data structure (see schema below)
-3. **Render & screenshot** — Run the wrapper script which auto-discovers project root and invokes `render.py`
+2. **Summarize into JSON** — Write `data/temp/posters/poster_data.json`
+3. **Render & screenshot** — Run the render script, only pass `[poster_name].png`
 
 This design minimizes token cost: the HTML/CSS template is a static asset (~0 generation tokens). You only generate the JSON content.
 
@@ -23,9 +23,9 @@ This design minimizes token cost: the HTML/CSS template is a static asset (~0 ge
 
 ## Step 2: Save Poster Data as JSON
 
-Write the poster data to `poster_data.json` using the Write tool. Do NOT generate a Python script — just write the JSON file directly.
+Write `data/temp/posters/poster_data.json` in the current working directory using the Write tool. Do NOT generate a Python script — just write the JSON file directly.
 
-> **IMPORTANT**: Do NOT create a `gen_poster.py` or any intermediate HTML generation script. render.py handles template injection internally. Your only job is to write `poster_data.json`.
+> **IMPORTANT**: Do NOT create a `gen_poster.py` or any intermediate HTML generation script. render.py handles template injection internally. Your only job is to write `data/temp/posters/poster_data.json`.
 
 Follow this schema **exactly**:
 
@@ -200,38 +200,27 @@ Height adjusts automatically based on content.
 
 ## Step 3: Render to PNG
 
-Use the **wrapper script** in `scripts/` which automatically discovers the project root and resolves all paths:
+Only pass `[poster_name].png`. The script reads `data/temp/posters/poster_data.json` from cwd and outputs PNG to cwd. All paths are handled internally.
+[poster_name]: named by article
 
 ```bash
-python3 {SKILL_PATH}/scripts/render_poster.py \
-  --data poster_data.json \
-  --output poster.png \
-  --ratio medium
+python3 {SKILL_PATH}/scripts/render_poster.py [poster_name].png --ratio medium
 ```
 
-Or use the bash version:
-
-```bash
-bash {SKILL_PATH}/scripts/render_poster.sh \
-  --data poster_data.json \
-  --output poster.png \
-  --ratio medium
-```
-
-> **How it works**: The wrapper script walks up from `cwd` looking for a `.claude/` directory to identify the project root (same logic as Claude Code). It then:
-> 1. Creates `<project_root>/data/temp/posters/` if it doesn't exist
-> 2. Resolves relative `--data` and `--output` paths to that directory
-> 3. Calls `render.py` with the correctly resolved paths
->
-> This means you **never need to hardcode or `cd` into a specific directory**. Just pass the filenames and the script handles the rest.
->
 > **Valid flags**:
-> - `--data` (JSON file name, required — resolved to `<project_root>/data/temp/posters/`)
-> - `--output` (PNG output file name, required — resolved to `<project_root>/data/temp/posters/`)
+> - First positional argument: output PNG filename (required, e.g. `money_analysis.png`)
 > - `--ratio` (`narrow` | `medium` | `wide`, default: medium)
 > - `--scale` (`1` | `2` | `3`, device scale factor for Retina, default: 2)
 
 If Playwright is not installed, `render.py` will automatically save a `poster.html` file instead and print instructions. Present this file to the user for manual screenshot.
+
+## Step 4: 发送截图给用户
+渲染脚本输出的最后一行包含 PNG 完整路径（形如 `OK: /path/to/xxx.png ...`），直接提取该路径调用 send_image：
+```
+send_image ({file_path: "< 脚本输出中的 PNG 完整路径>", alt_text: "文章海报" })
+```
+
+`send_image` 工具会自动上传到飞书并注入消息卡片，无需 CDN 中转。
 
 ## 调用实践
 必须阅读以下内容：
