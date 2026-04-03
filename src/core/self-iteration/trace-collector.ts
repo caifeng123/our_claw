@@ -22,6 +22,24 @@ import type {
 } from './types.js'
 import { SKILLS_DIR } from './config.js'
 
+// ==================== 时区工具 ====================
+
+const TIMEZONE = 'Asia/Shanghai'
+
+/**
+ * 获取当前中国标准时间的 YYYY-MM-DD 日期字符串
+ */
+function getChinaDate(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: TIMEZONE })
+}
+
+/**
+ * 将时间戳格式化为带 +08:00 的 ISO 格式
+ */
+function formatChinaISO(timestamp: number): string {
+  return new Date(timestamp).toLocaleString('sv-SE', { timeZone: TIMEZONE }).replace(' ', 'T') + '+08:00'
+}
+
 /** 活跃 turn — 内存中跟踪正在进行的 turn */
 interface ActiveTurn {
   sessionId: string
@@ -68,8 +86,8 @@ export class TraceCollector {
     const trace: TurnTrace = {
       sessionId: turn.sessionId,
       userIntent: turn.userIntent,
-      startedAt: new Date(turn.startedAt).toISOString(),
-      finishedAt: new Date(now).toISOString(),
+      startedAt: formatChinaISO(turn.startedAt),
+      finishedAt: formatChinaISO(now),
       duration: now - turn.startedAt,
       timeline: turn.timeline,
       output: finalOutput,
@@ -130,8 +148,8 @@ export class TraceCollector {
   static toSkillTrace(view: SkillView, userIntent: string, sessionId: string): SkillTrace {
     return {
       sessionId,
-      startedAt: new Date(view.startedAt).toISOString(),
-      finishedAt: new Date(view.finishedAt).toISOString(),
+      startedAt: formatChinaISO(view.startedAt),
+      finishedAt: formatChinaISO(view.finishedAt),
       duration: view.duration,
       userIntent,
       steps: view.steps,
@@ -148,7 +166,7 @@ export class TraceCollector {
    */
   private persistPerSkill(trace: TurnTrace): void {
     const skillNames = TraceCollector.extractSkillNames(trace)
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getChinaDate()
 
     for (const skillName of skillNames) {
       const view = TraceCollector.sliceForSkill(trace, skillName)

@@ -1,153 +1,187 @@
 /**
- * CronJob 持久化存储
- * 
- * - cronjobs.json: 任务定义，全量读写
- * - cronjob-logs.jsonl: 执行日志，append-only
+ * CronStore V2 — 持久化存储
+ *
+ * 只管理用户任务。系统任务由 system-jobs.ts 硬编码提供。
+ *
+ * 存储结构：
+ *   data/cronjobs.json      — 用户任务列表 { jobs: CronJob[] }
+ *   data/cronjob-logs.jsonl  — 执行日志（append-only, 每行一条 JSON）
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync } from 'fs'
+import { join, dirname } from 'path'
 import { randomUUID } from 'crypto'
-import { dirname } from 'path'
-import type { CronJob, CronJobLog, CreateCronJobInput } from './types.js'
+import type {
+  CronJob,
+  CreateJobParams,
+  UpdateJobParams,
+  CronJobLog,
+  DEFAULT_TIMEOUT_MS,
+} from './types.js'
+import { DEFAULT_TIMEOUT_MS as TIMEOUTS } from './types.js'
 
-const JOBS_FILE = 'data/cronjobs.json'
-const LOGS_FILE = 'data/cronjob-logs.jsonl'
+interface StoreFile {
+  jobs: CronJob[]
+}
 
 export class CronStore {
-  constructor() {
-    // 确保 data 目录存在
-    const dir = dirname(JOBS_FILE)
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
+  private jobsPath: string
+  private logsPath: string
+
+  constructor(dataDir: string) {
+    // 确保目录存在
+    if (!existsSync(dataDir)) {
+      mkdirSync(dataDir, { recursive: true })
+    }
+
+    this.jobsPath = join(dataDir, 'cronjobs.json')
+    this.logsPath = join(dataDir, 'cronjob-logs.jsonl')
+
+    // 初始化空文件
+    if (!existsSync(this.jobsPath)) {
+      this.writeJobs([])
     }
   }
 
-  // ==================== Jobs CRUD ====================
-
-  /**
-   * 加载所有任务
-   */
-  loadJobs(): CronJob[] {
-    if (!existsSync(JOBS_FILE)) return []
-    try {
-      const raw = readFileSync(JOBS_FILE, 'utf-8')
-      const data = JSON.parse(raw)
-      return Array.isArray(data.jobs) ? data.jobs : []
-    } catch {
-      console.warn('⚠️ 读取 cronjobs.json 失败，返回空列表')
-      return []
-    }
-  }
-
-  /**
-   * 保存所有任务（原子写：先写 tmp 再 rename）
-   */
-  saveJobs(jobs: CronJob[]): void {
-    const content = JSON.stringify({ jobs }, null, 2)
-    const tmpFile = `${JOBS_FILE}.tmp`
-    writeFileSync(tmpFile, content, 'utf-8')
-    renameSync(tmpFile, JOBS_FILE)
-  }
+  // ─────────────────── 任务 CRUD ───────────────────
 
   /**
    * 创建任务
    */
-  createJob(input: CreateCronJobInput): CronJob {
-    const jobs = this.loadJobs()
+  createJob(params: CreateJobParams): CronJob {
+    const now = Date.now()
+    const defaultTimeout = TIMEOUTS[params.taskType] ?? 120_000
+
     const job: CronJob = {
-      ...input,
+      // 定义层
       id: randomUUID(),
-      createdAt: Date.now(),
+      name: params.name,
+      cron: params.cron,
+      taskType: params.taskType,
+      taskConfig: params.taskConfig,
+      target: params.target,
+      createdAt: now,
+
+      // 配置层（用户可指定或使用默认值）
+      enabled: params.enabled ?? true,
+      missPolicy: params.missPolicy ?? 'run_once',
+      maxRetries: params.maxRetries ?? 3,
+      retryDelayMs: params.retryDelayMs ?? 60_000,
+      timeoutMs: params.timeoutMs ?? defaultTimeout,
+
+      // 运行层（初始化为空）
+      lastRunAt: null,
+      lastRunStatus: null,
+      nextRunAt: null,
+      retryCount: 0,
     }
+
+    const jobs = this.readJobs()
     jobs.push(job)
-    this.saveJobs(jobs)
-    console.log(`✅ CronJob 创建成功: [${job.name}] (${job.id})`)
+    this.writeJobs(jobs)
+
+    console.log(`📝 [CronStore] 任务已创建: ${job.name} (${job.id})`)
     return job
   }
 
   /**
-   * 按 ID 查找任务
+   * 获取单个任务
    */
-  getJob(id: string): CronJob | null {
-    return this.loadJobs().find(j => j.id === id) ?? null
+  getJob(jobId: string): CronJob | undefined {
+    return this.readJobs().find(j => j.id === jobId)
   }
 
   /**
-   * 列出任务
+   * 列出所有任务
    */
   listJobs(enabledOnly = false): CronJob[] {
-    const jobs = this.loadJobs()
+    const jobs = this.readJobs()
     return enabledOnly ? jobs.filter(j => j.enabled) : jobs
   }
 
   /**
    * 更新任务
    */
-  updateJob(id: string, updates: Partial<CronJob>): CronJob | null {
-    const jobs = this.loadJobs()
-    const index = jobs.findIndex(j => j.id === id)
-    if (index === -1) return null
+  updateJob(jobId: string, updates: UpdateJobParams): CronJob | undefined {
+    const jobs = this.readJobs()
+    const index = jobs.findIndex(j => j.id === jobId)
+    if (index === -1) return undefined
 
-    // 不允许通过 updates 修改 id 和 createdAt
-    const { id: _id, createdAt: _ca, ...safeUpdates } = updates
-    jobs[index] = { ...jobs[index], ...safeUpdates } as CronJob
-    this.saveJobs(jobs)
+    // 合并更新
+    jobs[index] = { ...jobs[index], ...updates }
+    this.writeJobs(jobs)
+
     return jobs[index]
   }
 
   /**
    * 删除任务
    */
-  deleteJob(id: string): boolean {
-    const jobs = this.loadJobs()
-    const filtered = jobs.filter(j => j.id !== id)
+  deleteJob(jobId: string): boolean {
+    const jobs = this.readJobs()
+    const filtered = jobs.filter(j => j.id !== jobId)
     if (filtered.length === jobs.length) return false
-    this.saveJobs(filtered)
-    console.log(`🗑️ CronJob 已删除: ${id}`)
+
+    this.writeJobs(filtered)
+    console.log(`🗑️ [CronStore] 任务已删除: ${jobId}`)
     return true
   }
 
-  // ==================== Logs ====================
+  // ─────────────────── 日志操作 ───────────────────
 
   /**
-   * 追加一条执行日志
+   * 追加执行日志
    */
-  appendLog(log: CronJobLog): void {
-    const line = JSON.stringify(log) + '\n'
-    appendFileSync(LOGS_FILE, line, 'utf-8')
+  appendLog(log: Omit<CronJobLog, 'id'>): void {
+    const fullLog: CronJobLog = {
+      ...log,
+      id: randomUUID(),
+    }
+
+    try {
+      appendFileSync(this.logsPath, JSON.stringify(fullLog) + '\n', 'utf-8')
+    } catch (err) {
+      console.error('📝 [CronStore] 写入日志失败:', err)
+    }
   }
 
   /**
-   * 查看指定任务的执行日志（倒序，最近的在前）
+   * 获取指定任务的执行日志
    */
   getJobLogs(jobId: string, limit = 10): CronJobLog[] {
-    if (!existsSync(LOGS_FILE)) return []
+    if (!existsSync(this.logsPath)) return []
+
     try {
-      const raw = readFileSync(LOGS_FILE, 'utf-8')
-      const allLogs: CronJobLog[] = raw
+      const content = readFileSync(this.logsPath, 'utf-8')
+      const allLogs: CronJobLog[] = content
         .split('\n')
         .filter(line => line.trim())
         .map(line => {
-          try { return JSON.parse(line) } catch { return null }
+          try { return JSON.parse(line) }
+          catch { return null }
         })
-        .filter((log): log is CronJobLog => log !== null && log.jobId === jobId)
+        .filter((log): log is CronJobLog => log !== null)
 
-      // 倒序取最近 N 条
-      return allLogs.reverse().slice(0, limit)
+      // 按时间倒序，取最近 N 条
+      return allLogs
+        .filter(log => log.jobId === jobId)
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .slice(0, limit)
     } catch {
       return []
     }
   }
 
   /**
-   * 清理过期日志（默认保留 7 天）
+   * 清理过期日志（保留最近 N 天）
    */
-  cleanOldLogs(maxAge = 7 * 24 * 60 * 60 * 1000): number {
-    if (!existsSync(LOGS_FILE)) return 0
+  cleanOldLogs(retentionDays = 7): number {
+    if (!existsSync(this.logsPath)) return 0
+
     try {
-      const raw = readFileSync(LOGS_FILE, 'utf-8')
-      const cutoff = Date.now() - maxAge
-      const lines = raw.split('\n').filter(line => line.trim())
+      const content = readFileSync(this.logsPath, 'utf-8')
+      const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+      const lines = content.split('\n').filter(line => line.trim())
       const kept: string[] = []
       let removed = 0
 
@@ -160,18 +194,47 @@ export class CronStore {
             removed++
           }
         } catch {
-          // 格式损坏的行直接丢弃
+          // 损坏的行丢弃
           removed++
         }
       }
 
       if (removed > 0) {
-        writeFileSync(LOGS_FILE, kept.join('\n') + (kept.length > 0 ? '\n' : ''), 'utf-8')
-        console.log(`🧹 清理了 ${removed} 条过期 CronJob 日志`)
+        writeFileSync(this.logsPath, kept.join('\n') + (kept.length ? '\n' : ''), 'utf-8')
+        console.log(`🧹 [CronStore] 清理了 ${removed} 条过期日志`)
       }
+
       return removed
     } catch {
       return 0
+    }
+  }
+
+  // ─────────────────── 内部方法 ───────────────────
+
+  private readJobs(): CronJob[] {
+    try {
+      const content = readFileSync(this.jobsPath, 'utf-8')
+      const data: StoreFile = JSON.parse(content)
+      return data.jobs || []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * 原子写入：先写 .tmp 再 rename
+   */
+  private writeJobs(jobs: CronJob[]): void {
+    const data: StoreFile = { jobs }
+    const tmpPath = this.jobsPath + '.tmp'
+
+    try {
+      writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8')
+      renameSync(tmpPath, this.jobsPath)
+    } catch (err) {
+      console.error('📝 [CronStore] 写入失败:', err)
+      throw err
     }
   }
 }

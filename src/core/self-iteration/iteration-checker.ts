@@ -25,6 +25,17 @@ import {
 import { SKILLS_DIR } from './config.js'
 import { SESSIONS_ROOT } from '../../utils/paths.js'
 
+// ==================== 时区工具 ====================
+
+const TIMEZONE = 'Asia/Shanghai'
+
+/**
+ * 获取当前中国标准时间的 YYYY-MM-DD 日期字符串
+ */
+function getChinaDate(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: TIMEZONE })
+}
+
 export class IterationChecker {
   private claudeEngine: ClaudeEngine
 
@@ -36,7 +47,7 @@ export class IterationChecker {
 
   async runNightly(skillFilter: 'all' | string[]): Promise<NightlyReport> {
     const report: NightlyReport = {
-      runAt: new Date().toISOString(),
+      runAt: new Date().toLocaleString('sv-SE', { timeZone: TIMEZONE }).replace(' ', 'T') + '+08:00',
       skills: [],
     }
 
@@ -67,7 +78,7 @@ export class IterationChecker {
 
   private async processSkill(skillName: string): Promise<NightlySkillReport> {
     try {
-      const today = new Date().toISOString().slice(0, 10)
+      const today = getChinaDate()
       const skillDir = join(SKILLS_DIR, skillName)
       const traceFile = join(skillDir, 'iteration', 'traces', `${today}.jsonl`)
 
@@ -145,7 +156,7 @@ export class IterationChecker {
   private discoverSkillsWithTraces(): string[] {
     if (!existsSync(SKILLS_DIR)) return []
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getChinaDate()
 
     try {
       return readdirSync(SKILLS_DIR, { withFileTypes: true })

@@ -11,6 +11,17 @@ import * as path from 'node:path'
 import { MEMORY_CONFIG } from './config.js'
 import type { MemoryCat, MemorySource } from './config.js'
 
+// ==================== 时区工具 ====================
+
+const TIMEZONE = 'Asia/Shanghai'
+
+/**
+ * 获取当前中国标准时间的 YYYY-MM-DD HH:mm:ss 格式字符串
+ */
+function getChinaDateTimeString(): string {
+  return new Date().toLocaleString('sv-SE', { timeZone: TIMEZONE }).replace('T', ' ')
+}
+
 // ==================== 类型定义 ====================
 
 export interface MemoryEntry {
@@ -124,7 +135,7 @@ export class MemoryDB {
       return 'skipped'
     }
 
-    const now = new Date().toISOString().replace('T', ' ').slice(0, 19)
+    const now = getChinaDateTimeString()
 
     if (duplicateCheck.action === 'merge' && duplicateCheck.existingId !== undefined) {
       const existing = this.entries.find(e => e.id === duplicateCheck.existingId)
@@ -164,7 +175,7 @@ export class MemoryDB {
     if (fields.imp !== undefined) entry.imp = fields.imp
     if (fields.cat !== undefined) entry.cat = fields.cat
     if (fields.keywords !== undefined) entry.keywords = fields.keywords
-    entry.updated_at = new Date().toISOString().replace('T', ' ').slice(0, 19)
+    entry.updated_at = getChinaDateTimeString()
 
     this.rewrite()
   }

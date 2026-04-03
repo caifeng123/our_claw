@@ -12,6 +12,17 @@ import { join } from 'node:path'
 import type { SelfIterationConfig } from './types.js'
 import { DEFAULT_CONFIG, SKILLS_DIR } from './config.js'
 
+// ==================== 时区工具 ====================
+
+const TIMEZONE = 'Asia/Shanghai'
+
+/**
+ * 获取当前中国标准时间的 YYYY-MM-DD 日期字符串
+ */
+function getChinaDate(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: TIMEZONE })
+}
+
 export class SkillOptimizer {
   private config: SelfIterationConfig
 
@@ -78,10 +89,7 @@ export class SkillOptimizer {
       return { passed: false, reason: 'YAML frontmatter was removed (forbidden)' }
     }
 
-    // 3. 每日优化次数限制 — 检查今天 iteration 目录下 traces 中是否有优化记录
-    // 简化：用 best-practices.md 的 mtime 近似判断（同一天多次更新算一次优化）
-    // 更精确的方式可以在 best-practices.md frontmatter 里记录 today_optimizations
-    // 此处先做简单检查
+    // 3. 每日优化次数限制
     const todayCount = this.getTodayOptimizationCount(skillName)
     if (todayCount >= this.config.safety.maxOptimizationsPerDay) {
       return {
@@ -117,7 +125,7 @@ export class SkillOptimizer {
       const match = fm.match(/optimization_dates:\s*\[(.*?)\]/)
       if (!match) return 0
 
-      const today = new Date().toISOString().slice(0, 10)
+      const today = getChinaDate()
       const dates = (match[1] ?? "").split(',').map((s) => s.trim().replace(/"/g, ''))
       return dates.filter((d) => d === today).length
     } catch {

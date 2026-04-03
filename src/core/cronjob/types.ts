@@ -1,91 +1,142 @@
 /**
- * CronJob 能力 - 类型定义
+ * CronJob V2 — 类型定义
+ *
+ * 数据模型分三层：
+ *   定义层 — 用户创建时确定，不可变
+ *   配置层 — 策略参数，可后续修改
+ *   运行层 — 系统自动维护
  */
 
-// ==================== 任务定义 ====================
+// ─────────────────── 任务类型 ───────────────────
 
-export interface CronJob {
-  /** 唯一标识，UUID 自动生成 */
-  id: string
-  /** 任务名称，如 "每日科技早报" */
-  name: string
-  /** cron 表达式：标准 5 字段 或 @daily/@hourly/@weekly/@monthly */
-  cron: string
-  /** 任务类型 */
-  taskType: CronTaskType
-  /** 任务配置（按 taskType 不同） */
-  taskConfig: CronTaskConfig
-  /** 执行结果发送到哪个飞书会话（必填） */
-  notifyChatId: string
-  /** 话题 ID（仅记录，发送时不使用） */
-  notifyThreadId?: string
-  /** 是否启用 */
-  enabled: boolean
-  /** 创建时间戳 */
-  createdAt: number
-  /** 上次执行时间戳 */
-  lastRunAt?: number
-  /** 上次执行状态 */
-  lastRunStatus?: 'success' | 'failed'
-}
+/** 用户可选的任务类型 */
+export type UserTaskType = 'agent_prompt' | 'feishu_notify' | 'custom_script'
 
-export type CronTaskType = 'agent_prompt' | 'feishu_notify' | 'custom_script' | 'self_iteration'
+/** 包含系统内部类型 */
+export type CronTaskType = UserTaskType | 'self_iteration'
 
-// ==================== 任务配置 ====================
+// ─────────────────── 错过补偿策略 ───────────────────
 
-export type CronTaskConfig =
-  | AgentPromptConfig
-  | FeishuNotifyConfig
-  | CustomScriptConfig
-  | SelfIterationTaskConfig
+/**
+ * run_once — 不管错过几次，只补执行一次（默认）
+ * skip    — 直接跳到下一个周期
+ */
+export type MissPolicy = 'run_once' | 'skip'
+
+// ─────────────────── 运行状态 ───────────────────
+
+export type RunStatus = 'running' | 'success' | 'failed' | 'retrying'
+
+// ─────────────────── 通知目标 ───────────────────
+
+/**
+ * 通知目标，根据 ID 前缀自动判断类型：
+ * - oc_ 开头 → 群聊 (chat_id)
+ * - ou_ 开头 → 个人私聊 (open_id)
+ */
+export type NotifyTarget = string
+
+// ─────────────────── TaskConfig 类型 ───────────────────
 
 export interface AgentPromptConfig {
-  type: 'agent_prompt'
-  /** 让 Agent 执行的 prompt */
   prompt: string
+  context?: string
 }
 
 export interface FeishuNotifyConfig {
-  type: 'feishu_notify'
-  /** 静态模板，支持 {{date}} {{time}} {{weekday}} {{datetime}} 变量 */
-  messageTemplate?: string
-  /** 动态模式：让 Agent 生成消息内容的 prompt */
-  agentPrompt?: string
+  messageTemplate: string
 }
 
 export interface CustomScriptConfig {
-  type: 'custom_script'
-  /** shell 命令 */
   command: string
-  /** 超时毫秒数，默认 30000 */
-  timeout?: number
 }
 
-export interface SelfIterationTaskConfig {
-  type: 'self_iteration'
-  /** 'all' 扫描所有有 trace 的 Skill，或指定名称列表 */
-  skills: 'all' | string[]
+export interface SelfIterationConfig {
+  skills: string  // 'all' 或逗号分隔的 skill 名
 }
 
-// ==================== 执行日志 ====================
+export type TaskConfig =
+  | AgentPromptConfig
+  | FeishuNotifyConfig
+  | CustomScriptConfig
+  | SelfIterationConfig
+
+// ─────────────────── CronJob 主结构 ───────────────────
+
+export interface CronJob {
+  // ── 定义层（创建时确定）──
+  id: string
+  name: string
+  cron: string
+  taskType: CronTaskType
+  taskConfig: TaskConfig
+  target: NotifyTarget
+  createdAt: number
+
+  // ── 配置层（可后续修改）──
+  enabled: boolean
+  missPolicy: MissPolicy
+  maxRetries: number
+  retryDelayMs: number
+  timeoutMs: number
+
+  // ── 运行层（系统自动维护）──
+  lastRunAt: number | null
+  lastRunStatus: RunStatus | null
+  nextRunAt: number | null
+  retryCount: number
+
+  // ── 标记 ──
+  system?: boolean  // 系统内置任务标记
+}
+
+// ─────────────────── 创建参数（不含运行层字段）───────────────────
+
+export interface CreateJobParams {
+  name: string
+  cron: string
+  taskType: CronTaskType
+  taskConfig: TaskConfig
+  target: NotifyTarget
+  enabled?: boolean
+  missPolicy?: MissPolicy
+  maxRetries?: number
+  retryDelayMs?: number
+  timeoutMs?: number
+  system?: boolean
+}
+
+// ─────────────────── 更新参数 ───────────────────
+
+export type UpdateJobParams = Partial<
+  Pick<CronJob,
+    | 'name' | 'cron' | 'taskConfig' | 'target'
+    | 'enabled' | 'missPolicy' | 'maxRetries'
+    | 'retryDelayMs' | 'timeoutMs'
+    // 运行层字段也允许系统内部更新
+    | 'lastRunAt' | 'lastRunStatus' | 'nextRunAt' | 'retryCount'
+  >
+>
+
+// ─────────────────── 执行日志 ───────────────────
 
 export interface CronJobLog {
-  /** 关联任务 ID */
+  id: string
   jobId: string
-  /** 冗余任务名，方便日志可读 */
   jobName: string
-  /** 开始时间戳 */
   startedAt: number
-  /** 结束时间戳 */
   finishedAt: number
-  /** 执行状态 */
   status: 'success' | 'failed' | 'timeout'
-  /** 执行结果摘要（截断 500 字符） */
   result?: string
-  /** 错误信息 */
   error?: string
+  attempt: number   // 第几次尝试（1 = 首次，>1 = 重试）
 }
 
-// ==================== 创建任务的输入 ====================
+// ─────────────────── 默认超时配置 ───────────────────
 
-export type CreateCronJobInput = Omit<CronJob, 'id' | 'createdAt' | 'lastRunAt' | 'lastRunStatus'>
+export const DEFAULT_TIMEOUT_MS: Record<CronTaskType, number> = {
+  agent_prompt: 120_000,
+  feishu_notify: 15_000,
+  custom_script: 30_000,
+  self_iteration: 300_000,
+}

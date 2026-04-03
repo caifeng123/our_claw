@@ -29,34 +29,36 @@ export const calculatorTool: RegisteredTool = {
 }
 
 /**
- * 时间工具示例
+ * 格式化中国标准时间 (Asia/Shanghai, UTC+8)
+ */
+function formatChinaTime(format: string): string {
+  const now = new Date()
+  switch (format) {
+    case 'iso':
+      // 返回带 +08:00 偏移的 ISO 格式
+      return now.toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(' ', 'T') + '+08:00'
+    case 'locale':
+      return now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+    case 'timestamp':
+      return now.getTime().toString()
+    default:
+      return now.toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(' ', 'T') + '+08:00'
+  }
+}
+
+/**
+ * 时间工具 — 返回中国标准时间 (Asia/Shanghai, UTC+8)
  */
 export const timeTool: RegisteredTool = {
   name: 'get_current_time',
-  description: '获取当前时间',
+  description: '获取当前中国标准时间 (Asia/Shanghai, UTC+8)',
   inputSchema: {
-    format: z.enum(['iso', 'locale', 'timestamp']).describe("Time format").default('iso')
+    format: z.enum(['iso', 'locale', 'timestamp']).describe("Time format: iso (带时区的ISO格式), locale (中文本地化格式), timestamp (Unix毫秒时间戳)").default('iso')
   },
   execute: async (args) => {
     try {
       const { format = 'iso' } = args
-      const now = new Date()
-
-      let result: string
-
-      switch (format) {
-        case 'iso':
-          result = now.toISOString()
-          break
-        case 'locale':
-          result = now.toLocaleString()
-          break
-        case 'timestamp':
-          result = now.getTime().toString()
-          break
-        default:
-          result = now.toISOString()
-      }
+      const result = formatChinaTime(format)
 
       return {
         success: true,
