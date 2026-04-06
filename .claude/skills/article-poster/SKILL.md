@@ -217,10 +217,11 @@ If Playwright is not installed, `render.py` will automatically save a `poster.ht
 ## Step 4: 发送截图给用户
 渲染脚本输出的最后一行包含 PNG 完整路径（形如 `OK: /path/to/xxx.png ...`），直接提取该路径调用 send_image：
 ```
-send_image ({file_path: "< 脚本输出中的 PNG 完整路径>", alt_text: "文章海报" })
+send_image ({file_path: "<脚本输出中的 PNG 完整路径>", alt_text: "文章海报" })
 ```
 
-`send_image` 工具会自动上传到飞书并注入消息卡片，无需 CDN 中转。
+> **IMPORTANT**: `send_image` 调用成功后，图片已注入到消息卡片中。
+> 不要在回复文本中再输出 image_key、文件路径、或 `![](...)` 格式的图片引用，否则会导致重复展示。
 
 ## 调用实践
 必须阅读以下内容：

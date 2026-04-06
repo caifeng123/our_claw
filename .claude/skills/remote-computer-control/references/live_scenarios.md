@@ -5,12 +5,28 @@
 ### 触发指令
 - "开播了"、"开始直播"、"开播"
 
+### 常用开播地址映射
+
+以下为预置的常用开播地址，用户可通过**名称/别名**快速指定：
+
+| 名称 | 别名 | 直播地址 |
+|------|------|---------|
+| funwave泰国 | funwaveth | `https://www.tiktok.com/@funwave2000th/live` |
+| funwave越南 | funwavevn | `https://www.tiktok.com/@funwave2000/live` |
+| funwave新加坡 | funwavesg | `https://www.tiktok.com/@funwave2000sg/live` |
+| funwave马来 | funwavem | `https://www.tiktok.com/@funwave2000my/live` |
+| playcc2026泰国 | playcc2026th | `https://www.tiktok.com/@playcc2026/live` |
+| playcc2026新加坡 | playcc2026sg | `https://www.tiktok.com/@playcc_sg/live` |
+| playcc2026马来 | playcc2026my | `https://www.tiktok.com/@playcc2026my/live` |
+
+> **维护说明**：如需新增常用地址，直接在上方表格追加行即可。
+
 ### 执行流程
 
 1. **确认直播 URL**
-   - 首次使用：询问用户是否使用默认地址 `https://www.tiktok.com/@funwave2000th/live`
-   - 已有记录：询问 "使用上次地址（{地址}）还是其他？"
-   - 记录最终 URL 到 `data/temp/last_live_url.txt`
+   - 用户指定了名称/别名：在上方「常用开播地址映射」表中查找匹配项，使用对应 URL
+   - 用户未指定或指定的名称不在映射表中：**必须询问用户提供完整的直播 URL，严禁自行编造或猜测地址**
+   - 用户直接给出了完整 URL：直接使用该 URL
 
 2. **编写目标级 Prompt 并执行**
    ```bash
