@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"cf/computer_use/common"
+	"computer_use/common"
 
 	"code.byted.org/iaasng/lumi-cua-go-sdk/src/lumi_cua_sdk"
 )

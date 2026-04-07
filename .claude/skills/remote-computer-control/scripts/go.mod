@@ -1,4 +1,4 @@
-module cf/computer_use
+module computer_use
 
 go 1.19
 

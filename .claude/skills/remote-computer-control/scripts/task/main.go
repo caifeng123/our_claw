@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"cf/computer_use/common"
+	"computer_use/common"
 )
 
 func main() {
