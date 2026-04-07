@@ -65,5 +65,5 @@ export function getChinaWeekday(timestamp?: number): string {
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
   const date = timestamp ? new Date(timestamp) : new Date()
   const chinaTime = new Date(date.toLocaleString('en-US', { timeZone: TIMEZONE }))
-  return weekdays[chinaTime.getDay()]
+  return weekdays[chinaTime.getDay()] ?? '未知'
 }

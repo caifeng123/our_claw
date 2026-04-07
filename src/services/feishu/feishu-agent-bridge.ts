@@ -99,6 +99,21 @@ export class FeishuAgentBridge {
     if (success) {
       this.isConnected = true;
 
+      // 注册 FeishuUploader 到全局上下文，使 send_image 工具支持本地路径和 HTTPS URL
+      const feishuSvc = this.feishuService;
+      setFeishuUploader({
+        async uploadImage(imagePath: string): Promise<string> {
+          const result = await feishuSvc.uploadImage(imagePath);
+          if (result.success && result.imageKey) return result.imageKey;
+          throw new Error(result.error || 'uploadImage failed');
+        },
+        async uploadImageFromUrl(imageUrl: string): Promise<string> {
+          const result = await feishuSvc.uploadImageFromUrl(imageUrl);
+          if (result.success && result.imageKey) return result.imageKey;
+          throw new Error(result.error || 'uploadImageFromUrl failed');
+        },
+      });
+
       console.log('✅ 飞书Agent桥接服务启动成功');
     } else {
       console.error('❌ 飞书Agent桥接服务启动失败');

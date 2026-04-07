@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"code.byted.org/iaasng/lumi-cua-go-sdk/src/lumi_cua_sdk"
@@ -13,10 +14,30 @@ const (
 	DefaultManagerURL = "https://iaas-cua-devbox-ecs-manager-v2.byted.org/mgr"
 	DefaultPlannerURL = "https://iaas-cua-devbox-planner-agent.byted.org/planner"
 
-	TaskTimeoutSeconds = 300
-	IdlePollInterval   = 5 * time.Second
-	MaxIdleWaitTime    = 90 * time.Second
+	DefaultTaskTimeoutSeconds = 600
+	DefaultIdlePollInterval   = 5 * time.Second
+	DefaultMaxIdleWaitTime    = 120 * time.Second
 )
+
+// GetTaskTimeout 获取任务超时时间，支持环境变量 CUA_TASK_TIMEOUT 覆盖
+func GetTaskTimeout() int {
+	if v := os.Getenv("CUA_TASK_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultTaskTimeoutSeconds
+}
+
+// GetMaxIdleWaitTime 获取空闲等待上限，支持环境变量 CUA_IDLE_WAIT 覆盖（秒）
+func GetMaxIdleWaitTime() time.Duration {
+	if v := os.Getenv("CUA_IDLE_WAIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return DefaultMaxIdleWaitTime
+}
 
 // InitCUAClient 初始化 Lumi CUA 客户端
 func InitCUAClient() *lumi_cua_sdk.LumiCuaClient {
@@ -40,6 +61,7 @@ func GetAvailableSandbox(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient
 
 // WaitForIdle 等待沙箱空闲
 func WaitForIdle(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, sandboxID string) error {
+	maxWait := GetMaxIdleWaitTime()
 	startTime := time.Now()
 	for {
 		isIdle, err := client.CheckIdle(ctx, sandboxID)
@@ -49,10 +71,10 @@ func WaitForIdle(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, sandbo
 		if isIdle {
 			return nil
 		}
-		if time.Since(startTime) > MaxIdleWaitTime {
-			return fmt.Errorf("等待 Planner 空闲超时（>%v）", MaxIdleWaitTime)
+		if time.Since(startTime) > maxWait {
+			return fmt.Errorf("等待 Planner 空闲超时（>%v）", maxWait)
 		}
-		time.Sleep(IdlePollInterval)
+		time.Sleep(DefaultIdlePollInterval)
 	}
 }
 
@@ -70,7 +92,8 @@ func SelectModel(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, sandbo
 
 // RunTask 执行 CUA 任务，返回执行步数
 func RunTask(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, prompt, sandboxID, model string) (int, error) {
-	messageChan, err := client.RunTask(ctx, prompt, sandboxID, model, "", "enabled", TaskTimeoutSeconds)
+	timeout := GetTaskTimeout()
+	messageChan, err := client.RunTask(ctx, prompt, sandboxID, model, "", "enabled", timeout)
 	if err != nil {
 		if taskBusyErr, ok := err.(*lumi_cua_sdk.TaskBusyError); ok {
 			return 0, fmt.Errorf("沙箱繁忙: %v", taskBusyErr)
@@ -87,7 +110,7 @@ func RunTask(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, prompt, sa
 		case "error":
 			return steps, fmt.Errorf("执行出错（步骤 %d）: %s", steps, message.Summary)
 		case "timeout":
-			return steps, fmt.Errorf("任务超时（%ds）", TaskTimeoutSeconds)
+			return steps, fmt.Errorf("任务超时（%ds）", timeout)
 		}
 	}
 	return steps, nil

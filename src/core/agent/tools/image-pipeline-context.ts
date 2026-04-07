@@ -3,8 +3,9 @@
  * 桥接 MCP 工具与每个请求的 FeishuService 和 StreamingCardRenderer
  */
 
-interface FeishuUploader {
+export interface FeishuUploader {
   uploadImage(imagePath: string): Promise<string>
+  uploadImageFromUrl(imageUrl: string): Promise<string>
 }
 
 interface ActiveRenderer {

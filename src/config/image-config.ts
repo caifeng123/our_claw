@@ -3,7 +3,7 @@
  */
 import mime from 'mime'
 
-export const UPLOADABLE_FORMATS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'ico'] as const
+export const UPLOADABLE_FORMATS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'ico', 'svg', 'tiff'] as const
 
 export const IMAGE_MAX_FILE_SIZE = 10 * 1024 * 1024
 
@@ -18,8 +18,28 @@ export function getImageMimeType(filePath: string): string {
 
 /**
  * 判断格式是否可直接上传到飞书
+ * 支持本地文件路径和 URL（自动剥离 query string 和 fragment）
  */
 export function isUploadable(filePath: string): boolean {
-  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  let pathToCheck = filePath
+
+  // 如果是 URL，先剥离 query string 和 fragment
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+    try {
+      const url = new URL(filePath)
+      pathToCheck = url.pathname
+    } catch {
+      // URL 解析失败，回退到原始字符串
+    }
+  }
+
+  const ext = pathToCheck.split('.').pop()?.toLowerCase() || ''
   return UPLOADABLE_FORMATS.includes(ext as any)
+}
+
+/**
+ * 判断给定字符串是否为 HTTP/HTTPS URL
+ */
+export function isHttpUrl(path: string): boolean {
+  return path.startsWith('http://') || path.startsWith('https://')
 }

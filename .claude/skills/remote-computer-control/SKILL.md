@@ -1,6 +1,6 @@
 ---
 name: remote-computer-control
-description: "远程计算机控制技能。当用户需要在远程桌面上执行操作时触发。支持场景：(1) 开播管理（'开播了'、'开始直播'、'开播'）(2) 下播管理（'下播'、'关掉浏览器'、'结束直播'）(3) 电商主图生成（'做白底主图'、'电商主图'）(4) 通用远程桌面操作（打开应用、浏览网页、文件操作等）。底层通过 Lumi CUA SDK 驱动远程沙箱执行。"
+description: "远程计算机控制技能。当用户需要在远程桌面上执行操作时触发。支持场景：(1) 开播管理（'开播了'、'开始直播'、'开播'）(2) 下播管理（'下播'、'关掉浏览器'、'结束直播'）(3) 电商主图生成（'做主图'、'电商主图'）(4) 通用远程桌面操作（打开应用、浏览网页、文件操作等）。底层通过 Lumi CUA SDK 驱动远程沙箱执行。"
 ---
 
 # Remote Computer Control
@@ -14,7 +14,8 @@ remote-computer-control/
 ├── SKILL.md                         # 本文件 — 技能定义与执行规范
 ├── references/
 │   ├── live_scenarios.md            # 直播场景专用流程（开播/下播）
-│   └── ecom_scenarios.md            # 电商主图生成场景
+│   ├── ecom_scenarios.md            # 电商主图生成场景
+│   └── ecom_style_guide.md          # 电商主图构图策略指南（Sanrio 品类）
 └── scripts/
     ├── common/                      # 公共库
     │   ├── cua.go                   #   CUA 初始化、沙箱管理、任务执行
@@ -41,7 +42,7 @@ remote-computer-control/
 |------|-----------|---------|
 | 开播 | "开播了"、"开始直播"、"开播" | → 读取 `references/live_scenarios.md` 的「开播管理」章节 |
 | 下播 | "下播"、"关掉浏览器"、"结束直播" | → 读取 `references/live_scenarios.md` 的「下播管理」章节 |
-| 电商主图 | "做白底主图"、"电商主图"、"产品图做主图" | → 读取 `references/ecom_scenarios.md` |
+| 电商主图 | "做主图"、"电商主图"、"产品图做主图"、"帮我做电商图" | → 读取 `references/ecom_scenarios.md` 和 `references/ecom_style_guide.md` |
 | 通用控制 | 其他远程操作请求 | → 进入下方「标准执行流程」 |
 
 ---
@@ -139,7 +140,7 @@ send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
 | `success: false` + `error` 非空 | 直接向用户报告错误原因，不截图验证 |
 | 沙箱不存在 / 连接失败 | 通知用户"远程沙箱不可用"，建议检查沙箱状态 |
 | Planner 服务繁忙 | Go 二进制内部自动等待轮询，超时后 JSON 返回错误 |
-| 任务执行超时（>300s） | JSON 返回 `success:false`，向用户报告超时 |
+| 任务执行超时（>600s） | JSON 返回 `success:false`，向用户报告超时 |
 | 需要登录凭证 | 发送截图给用户，请求用户提供登录信息，获取后继续 |
 | 图片 CDN 上传失败 | 使用不含图片的 Prompt 继续执行，告知用户图片未传入 |
 | `start.sh` / Go 编译失败 | 检查 Go 环境，报告具体错误 |
@@ -151,6 +152,7 @@ send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
 - **并发限制**：同一沙箱同时只能执行一个任务
 - **远程 OS**：当前仅支持 Windows 沙箱（通过 Lumi CUA ECS 管理）
 - **截图验证**：Claude 直接读截图判断，零额外延迟
+- **超时配置**：单任务默认 600s，空闲等待默认 120s，均可通过环境变量覆盖
 
 ## 调用实践
 必须阅读以下内容：

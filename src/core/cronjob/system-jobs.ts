@@ -37,6 +37,7 @@ function createSelfIterationJob(): CronJob {
 
     // 配置层
     enabled: true,
+    once: false,
     missPolicy: 'skip',       // 自迭代错过就跳过，不补
     maxRetries: 1,             // 最多重试 1 次
     retryDelayMs: 120_000,

@@ -108,11 +108,15 @@ export class CronStore {
     const index = jobs.findIndex(j => j.id === jobId)
     if (index === -1) return undefined
 
+    const existing = jobs[index]
+    if (!existing) return undefined
+
     // 合并更新
-    jobs[index] = { ...jobs[index], ...updates }
+    const updated: CronJob = { ...existing, ...updates }
+    jobs[index] = updated
     this.writeJobs(jobs)
 
-    return jobs[index]
+    return updated
   }
 
   /**

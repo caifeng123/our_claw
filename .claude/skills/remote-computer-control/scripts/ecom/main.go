@@ -15,18 +15,30 @@ import (
 
 const maxGeminiRetries = 2
 
+// ─── 自定义 flag 类型：支持多次 --prompt ───────────────────
+
+type stringSlice []string
+
+func (s *stringSlice) String() string { return strings.Join(*s, ", ") }
+func (s *stringSlice) Set(val string) error {
+	*s = append(*s, val)
+	return nil
+}
+
 func main() {
 	start := time.Now()
 	totalSteps := 0
 
 	// ── CLI ──
-	prompt := flag.String("prompt", "", "Gemini gen-image prompt (English, required)")
+	var promptList stringSlice
+	flag.Var(&promptList, "prompt", "Gemini prompt (repeatable, one per tab)")
 	images := flag.String("images", "", "Local product image paths, comma separated (required)")
 	flag.Parse()
 
-	if *prompt == "" {
-		common.ExitWithError("--prompt is required", 0)
+	if len(promptList) == 0 {
+		common.ExitWithError("at least one --prompt is required", 0)
 	}
+
 	if *images == "" {
 		common.ExitWithError("--images is required", 0)
 	}
@@ -50,7 +62,7 @@ func main() {
 	cdnInputDir := fmt.Sprintf("images/%s/input", taskID)
 	cdnOutputDir := fmt.Sprintf("images/%s/output", taskID)
 
-	fmt.Fprintf(os.Stderr, "[ecom] TaskID=%s, images=%d\n", taskID, len(imagePaths))
+	fmt.Fprintf(os.Stderr, "[ecom] TaskID=%s, images=%d, schemes=%d\n", taskID, len(imagePaths), len(promptList))
 
 	// ── Step 0: Go HTTP — upload product images to CDN ──
 	fmt.Fprintf(os.Stderr, "[Step 0] Upload product images to CDN ...\n")
@@ -99,22 +111,70 @@ func main() {
 		exitWithDiag(ctx, sandbox, taskID, inputCDNUrls, totalSteps, start, fmt.Sprintf("Download failed: %v", err))
 	}
 
-	// ── Step 3: CUA — Gemini generate (with retry) ──
-	fmt.Fprintf(os.Stderr, "[Step 3] Gemini image generation ...\n")
-	geminiPrompt := buildGeminiPrompt(*prompt, inputDir, outputDir)
+	// ── Step 3: CUA — Gemini generate (multi-tab parallel, 4 sub-tasks) ──
+	fmt.Fprintf(os.Stderr, "[Step 3] Gemini image generation (%d schemes, multi-tab) ...\n", len(promptList))
+
+	tabCount := len(promptList)
+	submitPrompt := buildBatchSubmitPrompt(inputDir, promptList)
+	waitPrompt := buildBatchWaitPrompt(tabCount)
+	downloadPrompt := buildBatchDownloadPrompt(tabCount, outputDir)
+	cleanupPrompt := buildCleanupTabsPrompt()
+
 	var step3Err error
 	for attempt := 0; attempt <= maxGeminiRetries; attempt++ {
 		if attempt > 0 {
 			fmt.Fprintf(os.Stderr, "[Step 3] Retry #%d ...\n", attempt)
 			common.WaitForIdle(ctx, client, sandbox.ID())
 		}
-		steps, step3Err = common.RunTask(ctx, client, geminiPrompt, sandbox.ID(), model)
+
+		// ── 3a: Batch submit ──
+		fmt.Fprintf(os.Stderr, "[Step 3a] Batch submit %d tabs ...\n", tabCount)
+		steps, step3Err = common.RunTask(ctx, client, submitPrompt, sandbox.ID(), model)
 		totalSteps += steps
-		if step3Err == nil {
-			break
+		if step3Err != nil {
+			fmt.Fprintf(os.Stderr, "[Step 3a] Failed: %v\n", step3Err)
+			continue
 		}
-		fmt.Fprintf(os.Stderr, "[Step 3] Failed: %v\n", step3Err)
+
+		// ── 3b: Batch wait ──
+		fmt.Fprintf(os.Stderr, "[Step 3b] Wait for all tabs to complete ...\n")
+		common.WaitForIdle(ctx, client, sandbox.ID())
+		steps, step3Err = common.RunTask(ctx, client, waitPrompt, sandbox.ID(), model)
+		totalSteps += steps
+		if step3Err != nil {
+			fmt.Fprintf(os.Stderr, "[Step 3b] Failed: %v\n", step3Err)
+			continue
+		}
+
+		// ── 3c: Batch download ──
+		fmt.Fprintf(os.Stderr, "[Step 3c] Download from all tabs ...\n")
+		common.WaitForIdle(ctx, client, sandbox.ID())
+		steps, step3Err = common.RunTask(ctx, client, downloadPrompt, sandbox.ID(), model)
+		totalSteps += steps
+		if step3Err != nil {
+			fmt.Fprintf(os.Stderr, "[Step 3c] Failed: %v, retrying 3c only ...\n", step3Err)
+			common.WaitForIdle(ctx, client, sandbox.ID())
+			steps, step3Err = common.RunTask(ctx, client, downloadPrompt, sandbox.ID(), model)
+			totalSteps += steps
+			if step3Err != nil {
+				fmt.Fprintf(os.Stderr, "[Step 3c] Retry also failed: %v\n", step3Err)
+				continue
+			}
+		}
+
+		// all sub-tasks succeeded
+		break
 	}
+
+	// ── 3d: Cleanup tabs (best-effort, don't fail on error) ──
+	fmt.Fprintf(os.Stderr, "[Step 3d] Cleanup Gemini tabs ...\n")
+	common.WaitForIdle(ctx, client, sandbox.ID())
+	steps, cleanupErr := common.RunTask(ctx, client, cleanupPrompt, sandbox.ID(), model)
+	totalSteps += steps
+	if cleanupErr != nil {
+		fmt.Fprintf(os.Stderr, "[Step 3d] Cleanup failed (non-fatal): %v\n", cleanupErr)
+	}
+
 	if step3Err != nil {
 		exitWithDiag(ctx, sandbox, taskID, inputCDNUrls, totalSteps, start,
 			fmt.Sprintf("Gemini failed (retried %d): %v", maxGeminiRetries, step3Err))
@@ -122,6 +182,7 @@ func main() {
 
 	// ── Step 4: CUA — upload output/ via upload.mjs ──
 	fmt.Fprintf(os.Stderr, "[Step 4] Upload generated images to CDN ...\n")
+	common.WaitForIdle(ctx, client, sandbox.ID())
 	steps, err = common.RunTask(ctx, client, fmt.Sprintf(
 		`Open PowerShell and run: node C:\Users\ecs\Desktop\tools\upload.mjs --dir %s %s`,
 		cdnOutputDir, outputDir,
@@ -202,16 +263,84 @@ func buildDownloadPrompt(cdnURLs []string, originalPaths []string, inputDir stri
 	return fmt.Sprintf("Open PowerShell and run these commands to download product images:\n%s", strings.Join(cmds, "\n"))
 }
 
-func buildGeminiPrompt(userPrompt string, inputDir string, outputDir string) string {
+// ─── Gemini Multi-Tab Prompt Builders ──────────────────────
+
+// buildBatchSubmitPrompt: 3a — 依次在 N 个 Tab 中新建 Gemini 会话并提交，不等结果
+func buildBatchSubmitPrompt(inputDir string, promptsList []string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf(
+		`Open Chrome and complete the following tasks across %d tabs. `+
+			`For each tab, the process is: navigate to gemini.google.com, click "New chat", `+
+			`upload ALL images from '%s', select "Create images" mode, `+
+			`type the given prompt, and submit. `+
+			`After submitting in each tab, do NOT wait for generation results — `+
+			`immediately move on to open the next tab and repeat. `,
+		len(promptsList), inputDir,
+	))
+
+	for i, p := range promptsList {
+		if i == 0 {
+			sb.WriteString(fmt.Sprintf(
+				`Tab %d: Navigate to gemini.google.com. Click "New chat". `+
+					`Upload all images from '%s'. Click "Create images". `+
+					`Type this prompt: "%s". Submit and do not wait for results. `,
+				i+1, inputDir, p,
+			))
+		} else {
+			sb.WriteString(fmt.Sprintf(
+				`Tab %d: Press Ctrl+T to open a new tab. Navigate to gemini.google.com. Click "New chat". `+
+					`Upload all images from '%s'. Click "Create images". `+
+					`Type this prompt: "%s". Submit and do not wait for results. `,
+				i+1, inputDir, p,
+			))
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf(
+		`After all %d tabs have been submitted, stop. Do not close any tabs.`,
+		len(promptsList),
+	))
+
+	return sb.String()
+}
+
+// buildBatchWaitPrompt: 3b — 轮询检查所有 Tab 直到全部生成完成
+func buildBatchWaitPrompt(tabCount int) string {
 	return fmt.Sprintf(
-		`Open Chrome and navigate to gemini.google.com. `+
-			`First, click the "Create image" option to enter image creation mode. `+
-			`Then click the file upload button (attachment/image icon) to upload images. `+
-			`In the file picker dialog, navigate to the folder '%s' and select all image files inside it. `+
-			`After the images are uploaded and attached, type this prompt in the input field: "%s". `+
-			`Submit the prompt and wait for Gemini to finish generating the images. `+
-			`Once generation is complete, for each generated image, right-click on it and choose "Save image as", `+
-			`then navigate to '%s' and save it there. Repeat for all generated images.`,
-		inputDir, userPrompt, outputDir,
+		`There are %d Gemini tabs open in Chrome, each with a submitted image generation request. `+
+			`Each tab will generate exactly one image. `+
+			`Switch to each tab one by one (use Ctrl+Tab to cycle through tabs) and check if generation is complete. `+
+			`In each tab, scroll down to see if a generated image has appeared below the "Show thinking" section. `+
+			`If a tab is still generating (loading indicator visible), move on to the next tab and come back later. `+
+			`Keep cycling through all %d tabs until every tab shows a completed generated image. `+
+			`Once all tabs have finished generating, stop.`,
+		tabCount, tabCount,
 	)
+}
+
+// buildBatchDownloadPrompt: 3c — 逐 Tab 下载 Gemini 生成图到统一 output 目录
+func buildBatchDownloadPrompt(tabCount int, outputDir string) string {
+	return fmt.Sprintf(
+		`There are %d Gemini tabs open in Chrome, each with one generated image. `+
+			`Switch to each tab one by one and save the Gemini-generated image — `+
+			`do NOT save the product images that the user uploaded. `+
+			`How to tell them apart: `+
+			`user-uploaded images appear in the user message bubble (top of conversation, near user avatar); `+
+			`the Gemini-generated image appears in Gemini's response section (below "Show thinking", near the sparkle icon). `+
+			`In each tab: right-click the generated image → "Save image as" → `+
+			`in the Save As dialog address bar, type: %s → press Enter to navigate there → click Save. `+
+			`Do NOT save to Downloads or any other default folder. `+
+			`Save the generated image from each of the %d tabs into the same folder: %s `+
+			`After finishing all tabs, open PowerShell and run: ls '%s' `+
+			`to verify the total saved file count (should be %d files).`,
+		tabCount, outputDir, tabCount, outputDir, outputDir, tabCount,
+	)
+}
+
+// buildCleanupTabsPrompt: 3d — 关闭所有 Gemini Tab
+func buildCleanupTabsPrompt() string {
+	return `Close all Gemini tabs in Chrome. ` +
+		`Press Ctrl+W repeatedly to close each tab until no Gemini tabs remain. ` +
+		`If Chrome has no other tabs left, leave one blank tab open so Chrome does not exit entirely.`
 }
