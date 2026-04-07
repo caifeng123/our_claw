@@ -1,11 +1,14 @@
 /**
- * AgentEngine V6.0 - 模块化架构重构
+ * AgentEngine V6.1 - 模块化架构重构
  *
  * 核心变化：
  *   - 引入 ModuleRegistry，所有模块通过 registry.use() 注册
  *   - buildQueryOptions 由 Registry 自动合并，ClaudeEngine 不再硬编码模块依赖
  *   - wrapWithTraceCollector 迁移到 TraceModule.wrapHandlers
  *   - 入口文件简化为注册 + 生命周期调用
+ *
+ * V6.1 修复：
+ *   - 新增 getClaudeEngine() 方法，供 CronExecutor 注入 ClaudeEngineBridge
  *
  * 兼容性：对外 API 完全不变，内部组装方式从手动 wiring 改为 Module 声明式
  */
@@ -110,7 +113,7 @@ export class AgentEngine {
     // ─── 注册所有 Module ───
     this.registerModules()
 
-    console.log('🤖 Agent引擎 V6.0 初始化完成（模块化架构 + Resume + Skill 自迭代）')
+    console.log('🤖 Agent引擎 V6.1 初始化完成（模块化架构 + Resume + Skill 自迭代）')
   }
 
   /**
@@ -358,6 +361,17 @@ export class AgentEngine {
 
   getCronScheduler(): CronScheduler {
     return this.cronScheduler
+  }
+
+  // ==================== ClaudeEngine ====================
+
+  /**
+   * 获取底层 ClaudeEngine 实例
+   * 用途：供 CronExecutor 注入 ClaudeEngineBridge，
+   *       使 IterationChecker 能通过 sendMessage 派发 SubAgent
+   */
+  getClaudeEngine(): ClaudeEngine {
+    return this.claudeEngine
   }
 }
 

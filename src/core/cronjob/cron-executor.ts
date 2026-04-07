@@ -1,7 +1,13 @@
 /**
- * CronExecutor V2 — 任务执行器
+ * CronExecutor V2.1 — 任务执行器
  *
- * 改进点：
+ * V2.1 修复：
+ *   - self_iteration: 修复 IterationChecker 构造缺少 ClaudeEngine 参数的 Bug
+ *   - self_iteration: 修复调用不存在的 checkAndOptimize → 改为正确的 runNightly
+ *   - self_iteration: 增加 ClaudeEngineBridge 解耦接口，由外部注入 ClaudeEngine 引用
+ *   - self_iteration: 正确解析 SelfIterationConfig.skills（string → 'all' | string[]）
+ *
+ * 改进点（继承自 V2）：
  *   - custom_script: execSync → spawn（异步，不阻塞）
  *   - 所有任务类型支持 AbortSignal 超时取消
  *   - 通知目标支持 chat_id (oc_) 和 open_id (ou_)
@@ -41,6 +47,16 @@ export interface FeishuBridge {
 }
 
 /**
+ * ClaudeEngine 桥接接口（解耦，供 self_iteration 使用）
+ *
+ * IterationChecker 需要底层 ClaudeEngine 来派发 SubAgent，
+ * 而非上层 AgentBridge 的会话管理 API。
+ */
+export interface ClaudeEngineBridge {
+  sendMessage(userMessage: string, systemPrompt?: string): Promise<any>
+}
+
+/**
  * 解析通知目标的 receive_id_type
  */
 function resolveTargetType(target: NotifyTarget): 'chat_id' | 'open_id' {
@@ -51,6 +67,7 @@ function resolveTargetType(target: NotifyTarget): 'chat_id' | 'open_id' {
 export class CronExecutor {
   private agentBridge: AgentBridge | null = null
   private feishuBridge: FeishuBridge | null = null
+  private claudeEngineBridge: ClaudeEngineBridge | null = null
 
   /**
    * 延迟注入 AgentBridge（避免循环依赖）
@@ -61,6 +78,13 @@ export class CronExecutor {
 
   setFeishuBridge(bridge: FeishuBridge): void {
     this.feishuBridge = bridge
+  }
+
+  /**
+   * 延迟注入 ClaudeEngineBridge（供 self_iteration 使用）
+   */
+  setClaudeEngineBridge(bridge: ClaudeEngineBridge): void {
+    this.claudeEngineBridge = bridge
   }
 
   /**
@@ -238,21 +262,51 @@ export class CronExecutor {
   // ─────────────────── self_iteration ───────────────────
 
   private async executeSelfIteration(job: CronJob): Promise<string> {
+    if (!this.claudeEngineBridge) {
+      throw new Error(
+        'ClaudeEngineBridge 未注入，无法执行 self_iteration。' +
+        '请在启动时调用 cronExecutor.setClaudeEngineBridge(...)'
+      )
+    }
+
     const config = job.taskConfig as SelfIterationConfig
 
     try {
       // 动态导入，避免非必要依赖
       const { IterationChecker } = await import('../self-iteration/iteration-checker.js')
-      const checker = new IterationChecker()
-      const report = await checker.checkAndOptimize(config.skills)
+
+      // [FIX] IterationChecker 构造函数需要 ClaudeEngine（或兼容接口）
+      // 通过 ClaudeEngineBridge 提供的 sendMessage 能力传入
+      const checker = new IterationChecker(this.claudeEngineBridge as any)
+
+      // [FIX] 正确的方法名是 runNightly（而非 checkAndOptimize）
+      // 解析 skills 配置：'all' 或逗号分隔的 skill 名列表
+      const skillFilter: 'all' | string[] = config.skills === 'all'
+        ? 'all'
+        : config.skills.split(',').map(s => s.trim()).filter(Boolean)
+
+      const report = await checker.runNightly(skillFilter)
+
+      // 格式化报告
+      const reportLines = [
+        `🔄 Skill 自迭代报告 (${report.runAt})`,
+        `共分析 ${report.skills.length} 个 Skill:`,
+        ...report.skills.map(s => {
+          const icon = s.action === 'optimized' ? '🔧' :
+                       s.action === 'analyzed' ? '📊' :
+                       s.action === 'error' ? '❌' : '⏭️'
+          return `  ${icon} ${s.skillName}: ${s.action} — ${s.reason}`
+        }),
+      ]
+      const reportStr = reportLines.join('\n')
 
       // self_iteration 的通知目标可能为空（内部日志记录即可）
       // 如果配置了 target，也发送报告
       if (job.target && this.feishuBridge) {
-        await this.feishuBridge.sendText(job.target, `🔄 Skill 自迭代报告:\n${report}`)
+        await this.feishuBridge.sendText(job.target, reportStr)
       }
 
-      return report
+      return reportStr
     } catch (err) {
       throw new Error(`自迭代执行失败: ${err instanceof Error ? err.message : String(err)}`)
     }

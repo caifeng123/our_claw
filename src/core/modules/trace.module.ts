@@ -11,11 +11,20 @@ export function createTraceModule(traceCollector: TraceCollector): Module {
       const tc = traceCollector
       const sessionId = ctx.sessionId
 
+      // [FIX] 缓存 content delta，用于 finishTurn 时传入完整 output
+      let accumulatedOutput = ''
+
       // 启动 turn 级别的 timeline 记录
       tc.startTurn(sessionId, ctx.userMessage)
 
       return {
         ...inner,
+
+        onContentDelta: async (delta: string) => {
+          // 累积输出内容
+          accumulatedOutput += delta
+          await inner.onContentDelta?.(delta)
+        },
 
         onToolUseStart: async (
           toolName: string,
@@ -78,12 +87,17 @@ export function createTraceModule(traceCollector: TraceCollector): Module {
         },
 
         onContentStop: async () => {
-          await tc.finishTurn(sessionId, '')
+          // [FIX] 传入累积的完整输出，而非空字符串
+          await tc.finishTurn(sessionId, accumulatedOutput)
           await inner.onContentStop?.()
         },
 
         onError: async (error: string) => {
-          await tc.finishTurn(sessionId, `Error: ${error}`)
+          // error 场景也带上已累积的 output（如有）
+          const errorOutput = accumulatedOutput
+            ? `${accumulatedOutput}\n\nError: ${error}`
+            : `Error: ${error}`
+          await tc.finishTurn(sessionId, errorOutput)
           await inner.onError?.(error)
         },
       }

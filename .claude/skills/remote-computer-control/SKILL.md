@@ -1,6 +1,6 @@
 ---
 name: remote-computer-control
-description: "远程计算机控制技能。当用户需要在远程桌面上执行操作时触发。支持场景：(1) 开播管理（'开播了'、'开始直播'、'开播'）(2) 下播管理（'下播'、'关掉浏览器'、'结束直播'）(3) 通用远程桌面操作（打开应用、浏览网页、文件操作等）。底层通过 Lumi CUA SDK 驱动远程沙箱执行。"
+description: "远程计算机控制技能。当用户需要在远程桌面上执行操作时触发。支持场景：(1) 开播管理（'开播了'、'开始直播'、'开播'）(2) 下播管理（'下播'、'关掉浏览器'、'结束直播'）(3) 电商主图生成（'做白底主图'、'电商主图'）(4) 通用远程桌面操作（打开应用、浏览网页、文件操作等）。底层通过 Lumi CUA SDK 驱动远程沙箱执行。"
 ---
 
 # Remote Computer Control
@@ -13,10 +13,20 @@ description: "远程计算机控制技能。当用户需要在远程桌面上执
 remote-computer-control/
 ├── SKILL.md                         # 本文件 — 技能定义与执行规范
 ├── references/
-│   └── live_scenarios.md            # 直播场景专用流程（开播/下播）
+│   ├── live_scenarios.md            # 直播场景专用流程（开播/下播）
+│   └── ecom_scenarios.md            # 电商主图生成场景
 └── scripts/
-    ├── start.sh                     # 环境初始化（Go 依赖检查 + 增量编译）
-    ├── task.go                      # 远程执行器 — 调用 Lumi CUA SDK
+    ├── common/                      # 公共库
+    │   ├── cua.go                   #   CUA 初始化、沙箱管理、任务执行
+    │   ├── screenshot.go            #   截图保存
+    │   ├── cdn.go                   #   CDN 上传 + 查询 + URL 拼接
+    │   └── result.go                #   Result 结构、输出、环境变量工具
+    ├── task/
+    │   └── main.go                  # 通用远程控制
+    ├── ecom/
+    │   └── main.go                  # 电商主图生成
+    ├── build/                       # 编译产物目录（gitignore）
+    ├── start.sh                     # 自动扫描 + 增量编译
     ├── go.mod
     └── go.sum
 ```
@@ -31,6 +41,7 @@ remote-computer-control/
 |------|-----------|---------|
 | 开播 | "开播了"、"开始直播"、"开播" | → 读取 `references/live_scenarios.md` 的「开播管理」章节 |
 | 下播 | "下播"、"关掉浏览器"、"结束直播" | → 读取 `references/live_scenarios.md` 的「下播管理」章节 |
+| 电商主图 | "做白底主图"、"电商主图"、"产品图做主图" | → 读取 `references/ecom_scenarios.md` |
 | 通用控制 | 其他远程操作请求 | → 进入下方「标准执行流程」 |
 
 ---
@@ -43,7 +54,7 @@ remote-computer-control/
 bash $SKILL_DIR/scripts/start.sh
 ```
 
-增量编译：仅依赖变更或源码变更时重新构建，静默成功。
+自动扫描 `scripts/` 下所有含 `main.go` 的子目录，增量编译到 `scripts/build/`。
 
 ### 2. 编写目标级 Prompt 并执行
 
@@ -56,7 +67,7 @@ CUA Planner 自身具备将目标拆解为鼠标/键盘操作的能力，Claude 
 | 规则 | 说明 |
 |------|------|
 | **目标导向** | 描述期望的最终状态，而非操作步骤。CUA Planner 会自行规划具体操作 |
-| **禁止截图指令** | Prompt 中不允许出现"截图"、"screenshot"字样。截图由 `task.go` 自动完成 |
+| **禁止截图指令** | Prompt 中不允许出现"截图"、"screenshot"字样。截图由 Go 二进制自动完成 |
 | **图片使用占位符** | 需要传递图片到远程沙箱的位置写 `{IMAGE_URL}`，由 `--images` 参数传入 CDN URL 替换 |
 | **关键约束前置** | 如有特定要求（语言、区域、版本），在 Prompt 开头明确说明 |
 
@@ -71,39 +82,24 @@ CUA Planner 自身具备将目标拆解为鼠标/键盘操作的能力，Claude 
 ```
 1: 点击桌面Chrome图标
 2: 在地址栏输入 https://github.com
-3: 按回车
-4: 找到搜索框并点击
-5: 输入 OpenClaw
-6: 按回车
-7: 点击第一个结果
+...
 ```
-
-#### 含图片的 Prompt
-
-当用户发送了图片且需要传递到远程沙箱时：
-
-```
-打开 Chrome 访问 https://example.com/upload ，将图片 {IMAGE_URL} 上传到页面中。
-```
-
-执行时 `task.go` 会将用户图片上传 CDN 并替换 `{IMAGE_URL}` 为实际 URL。
 
 ### 3. 调用 Go 二进制执行
 
 ```bash
-$SKILL_DIR/scripts/task --prompt "目标级Prompt" --screenshot-dir "$PROJECT_ROOT/data/temp"
+# 通用场景
+$SKILL_DIR/scripts/build/task --prompt "目标级Prompt"
+
+# 含图片时追加 --images 参数
+$SKILL_DIR/scripts/build/task --prompt "Prompt含{IMAGE_URL}" --images "/path/to/image.png"
 ```
 
-含图片时追加 `--images` 参数：
-```bash
-$SKILL_DIR/scripts/task --prompt "Prompt含{IMAGE_URL}" --images "/path/to/image.png" --screenshot-dir "$PROJECT_ROOT/data/temp"
-```
-
-**Go 二进制输出 JSON 到 stdout：**
+**输出 JSON 到 stdout：**
 ```json
 {
   "success": true,
-  "screenshot": "/abs/path/to/final_screenshot.png",
+  "screenshot": "data/temp/final_screenshot.png",
   "image_urls": ["https://cdn.example.com/uploaded.png"],
   "duration_sec": 45.2,
   "steps_executed": 8,
@@ -114,10 +110,6 @@ $SKILL_DIR/scripts/task --prompt "Prompt含{IMAGE_URL}" --images "/path/to/image
 ### 4. 结果验证 — 用 Read 工具看截图
 
 **直接用 `Read` 工具读取截图文件，Claude 原生多模态能力即可看到画面内容。**
-
-```
-Read: <screenshot_path>
-```
 
 验证逻辑：
 
@@ -132,16 +124,11 @@ Read: <screenshot_path>
 - **截图不符合用户意图** → 分析偏差原因，优化 Prompt 重试（回到步骤 2，≤3 次）
 - **判定无法完成** → 发送截图 + 文字说明原因
 
-> **为什么用 `Read` 而不用 `analyze_image`？**
-> Claude 本身是多模态模型，可以直接看图。而且 Claude 已持有用户的原始请求上下文，天然具备"截图是否匹配意图"的判断能力。用 `analyze_image` 反而多一次 LLM 调用、多一层上下文传递，得不偿失。
-
 ### 5. 发送截图给用户
 
 ```
 send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
 ```
-
-`send_image` 工具会自动上传到飞书并注入消息卡片，无需 CDN 中转。
 
 ---
 
@@ -161,7 +148,6 @@ send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
 
 ## 性能与限制
 
-- **单次任务超时**：300 秒（硬编码于 `task.go`）
 - **并发限制**：同一沙箱同时只能执行一个任务
 - **远程 OS**：当前仅支持 Windows 沙箱（通过 Lumi CUA ECS 管理）
 - **截图验证**：Claude 直接读截图判断，零额外延迟

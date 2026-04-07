@@ -1,2 +1,10 @@
-task
+# 编译产物
+build/*
+
+# 增量编译缓存
 .mod_hash
+
+# Go
+*.exe
+*.test
+*.out
