@@ -59,7 +59,6 @@ $SKILL_DIR/scripts/build/ecom \
   --prompt "English prompt for scheme 1" \
   --prompt "English prompt for scheme 2" \
   --prompt "English prompt for scheme 3" \
-  2>>"$PROJECT_ROOT/data/temp/ecom.log"
 ```
 
 **CLI 参数**：

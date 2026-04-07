@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +15,31 @@ import (
 )
 
 const maxGeminiRetries = 2
+
+// ─── 日志 ─────────────────────────────────────────────────
+
+var logFile *os.File
+
+// initLog 在项目根目录的 data/temp/ecom.log 打开追加写日志文件
+func initLog() {
+	logDir := filepath.Join(common.FindProjectRoot(), "data", "temp")
+	os.MkdirAll(logDir, 0755)
+	f, err := os.OpenFile(filepath.Join(logDir, "ecom.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] cannot open log file: %v\n", err)
+		return
+	}
+	logFile = f
+}
+
+// logf 同时写 stderr 和日志文件
+func logf(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprint(os.Stderr, msg)
+	if logFile != nil {
+		fmt.Fprint(logFile, msg)
+	}
+}
 
 // ─── 自定义 flag 类型：支持多次 --prompt ───────────────────
 
@@ -28,6 +54,12 @@ func (s *stringSlice) Set(val string) error {
 func main() {
 	start := time.Now()
 	totalSteps := 0
+
+	// ── 初始化日志 ──
+	initLog()
+	if logFile != nil {
+		defer logFile.Close()
+	}
 
 	// ── CLI ──
 	var promptList stringSlice
@@ -62,10 +94,10 @@ func main() {
 	cdnInputDir := fmt.Sprintf("images/%s/input", taskID)
 	cdnOutputDir := fmt.Sprintf("images/%s/output", taskID)
 
-	fmt.Fprintf(os.Stderr, "[ecom] TaskID=%s, images=%d, schemes=%d\n", taskID, len(imagePaths), len(promptList))
+	logf("[ecom] TaskID=%s, images=%d, schemes=%d\n", taskID, len(imagePaths), len(promptList))
 
 	// ── Step 0: Go HTTP — upload product images to CDN ──
-	fmt.Fprintf(os.Stderr, "[Step 0] Upload product images to CDN ...\n")
+	logf("[Step 0] Upload product images to CDN ...\n")
 	var inputCDNUrls []string
 	for _, localPath := range imagePaths {
 		cdnUrl, err := common.UploadToCDN(localPath, cdnInputDir)
@@ -73,7 +105,7 @@ func main() {
 			common.ExitWithError(fmt.Sprintf("Upload failed (%s): %v", localPath, err), time.Since(start).Seconds())
 		}
 		inputCDNUrls = append(inputCDNUrls, cdnUrl)
-		fmt.Fprintf(os.Stderr, "  uploaded: %s -> %s\n", localPath, cdnUrl)
+		logf("  uploaded: %s -> %s\n", localPath, cdnUrl)
 	}
 
 	// ── CUA init ──
@@ -93,7 +125,7 @@ func main() {
 	}
 
 	// ── Step 1: CUA — create directories ──
-	fmt.Fprintf(os.Stderr, "[Step 1] Create sandbox directories ...\n")
+	logf("[Step 1] Create sandbox directories ...\n")
 	steps, err := common.RunTask(ctx, client, fmt.Sprintf(
 		`Open PowerShell and run: New-Item -ItemType Directory -Force -Path '%s'; New-Item -ItemType Directory -Force -Path '%s'`,
 		inputDir, outputDir,
@@ -104,7 +136,7 @@ func main() {
 	}
 
 	// ── Step 2: CUA — download product images ──
-	fmt.Fprintf(os.Stderr, "[Step 2] Download product images to sandbox ...\n")
+	logf("[Step 2] Download product images to sandbox ...\n")
 	steps, err = common.RunTask(ctx, client, buildDownloadPrompt(inputCDNUrls, imagePaths, inputDir), sandbox.ID(), model)
 	totalSteps += steps
 	if err != nil {
@@ -112,7 +144,7 @@ func main() {
 	}
 
 	// ── Step 3: CUA — Gemini generate (multi-tab parallel, 4 sub-tasks) ──
-	fmt.Fprintf(os.Stderr, "[Step 3] Gemini image generation (%d schemes, multi-tab) ...\n", len(promptList))
+	logf("[Step 3] Gemini image generation (%d schemes, multi-tab) ...\n", len(promptList))
 
 	tabCount := len(promptList)
 	submitPrompt := buildBatchSubmitPrompt(inputDir, promptList)
@@ -123,41 +155,41 @@ func main() {
 	var step3Err error
 	for attempt := 0; attempt <= maxGeminiRetries; attempt++ {
 		if attempt > 0 {
-			fmt.Fprintf(os.Stderr, "[Step 3] Retry #%d ...\n", attempt)
+			logf("[Step 3] Retry #%d ...\n", attempt)
 			common.WaitForIdle(ctx, client, sandbox.ID())
 		}
 
 		// ── 3a: Batch submit ──
-		fmt.Fprintf(os.Stderr, "[Step 3a] Batch submit %d tabs ...\n", tabCount)
+		logf("[Step 3a] Batch submit %d tabs ...\n", tabCount)
 		steps, step3Err = common.RunTask(ctx, client, submitPrompt, sandbox.ID(), model)
 		totalSteps += steps
 		if step3Err != nil {
-			fmt.Fprintf(os.Stderr, "[Step 3a] Failed: %v\n", step3Err)
+			logf("[Step 3a] Failed: %v\n", step3Err)
 			continue
 		}
 
 		// ── 3b: Batch wait ──
-		fmt.Fprintf(os.Stderr, "[Step 3b] Wait for all tabs to complete ...\n")
+		logf("[Step 3b] Wait for all tabs to complete ...\n")
 		common.WaitForIdle(ctx, client, sandbox.ID())
 		steps, step3Err = common.RunTask(ctx, client, waitPrompt, sandbox.ID(), model)
 		totalSteps += steps
 		if step3Err != nil {
-			fmt.Fprintf(os.Stderr, "[Step 3b] Failed: %v\n", step3Err)
+			logf("[Step 3b] Failed: %v\n", step3Err)
 			continue
 		}
 
 		// ── 3c: Batch download ──
-		fmt.Fprintf(os.Stderr, "[Step 3c] Download from all tabs ...\n")
+		logf("[Step 3c] Download from all tabs ...\n")
 		common.WaitForIdle(ctx, client, sandbox.ID())
 		steps, step3Err = common.RunTask(ctx, client, downloadPrompt, sandbox.ID(), model)
 		totalSteps += steps
 		if step3Err != nil {
-			fmt.Fprintf(os.Stderr, "[Step 3c] Failed: %v, retrying 3c only ...\n", step3Err)
+			logf("[Step 3c] Failed: %v, retrying 3c only ...\n", step3Err)
 			common.WaitForIdle(ctx, client, sandbox.ID())
 			steps, step3Err = common.RunTask(ctx, client, downloadPrompt, sandbox.ID(), model)
 			totalSteps += steps
 			if step3Err != nil {
-				fmt.Fprintf(os.Stderr, "[Step 3c] Retry also failed: %v\n", step3Err)
+				logf("[Step 3c] Retry also failed: %v\n", step3Err)
 				continue
 			}
 		}
@@ -167,12 +199,12 @@ func main() {
 	}
 
 	// ── 3d: Cleanup tabs (best-effort, don't fail on error) ──
-	fmt.Fprintf(os.Stderr, "[Step 3d] Cleanup Gemini tabs ...\n")
+	logf("[Step 3d] Cleanup Gemini tabs ...\n")
 	common.WaitForIdle(ctx, client, sandbox.ID())
 	steps, cleanupErr := common.RunTask(ctx, client, cleanupPrompt, sandbox.ID(), model)
 	totalSteps += steps
 	if cleanupErr != nil {
-		fmt.Fprintf(os.Stderr, "[Step 3d] Cleanup failed (non-fatal): %v\n", cleanupErr)
+		logf("[Step 3d] Cleanup failed (non-fatal): %v\n", cleanupErr)
 	}
 
 	if step3Err != nil {
@@ -181,7 +213,7 @@ func main() {
 	}
 
 	// ── Step 4: CUA — upload output/ via upload.mjs ──
-	fmt.Fprintf(os.Stderr, "[Step 4] Upload generated images to CDN ...\n")
+	logf("[Step 4] Upload generated images to CDN ...\n")
 	common.WaitForIdle(ctx, client, sandbox.ID())
 	steps, err = common.RunTask(ctx, client, fmt.Sprintf(
 		`Open PowerShell and run: node C:\Users\ecs\Desktop\tools\upload.mjs --dir %s %s`,
@@ -194,10 +226,10 @@ func main() {
 	}
 
 	// ── Step 5: Go HTTP — query CDN for output URLs ──
-	fmt.Fprintf(os.Stderr, "[Step 5] Query CDN for output URLs ...\n")
+	logf("[Step 5] Query CDN for output URLs ...\n")
 	dirResp, err := common.QueryCDNDir(cdnOutputDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[Step 5] Query failed: %v, fallback to screenshot\n", err)
+		logf("[Step 5] Query failed: %v, fallback to screenshot\n", err)
 		ssPath := common.SaveScreenshot(ctx, sandbox)
 		common.ExitWithResult(common.Result{
 			Success:       true,
@@ -212,7 +244,7 @@ func main() {
 	outputURLs := common.BuildCDNUrls(dirResp)
 
 	if len(outputURLs) > 0 {
-		fmt.Fprintf(os.Stderr, "[Done] Generated %d images\n", len(outputURLs))
+		logf("[Done] Generated %d images\n", len(outputURLs))
 		common.ExitWithResult(common.Result{
 			Success:         true,
 			TaskID:          taskID,
@@ -224,7 +256,7 @@ func main() {
 	}
 
 	// fallback: CDN query returned empty, screenshot for diagnosis
-	fmt.Fprintf(os.Stderr, "[Warn] CDN returned no files, taking screenshot ...\n")
+	logf("[Warn] CDN returned no files, taking screenshot ...\n")
 	ssPath := common.SaveScreenshot(ctx, sandbox)
 	common.ExitWithResult(common.Result{
 		Success:       true,
