@@ -19,6 +19,10 @@ const (
 	DefaultMaxIdleWaitTime    = 120 * time.Second
 )
 
+// Logger 日志回调类型，调用方可注入自己的日志函数
+// 设为 nil 则静默（不输出任何中间日志）
+var Logger func(format string, args ...interface{})
+
 // GetTaskTimeout 获取任务超时时间，支持环境变量 CUA_TASK_TIMEOUT 覆盖
 func GetTaskTimeout() int {
 	if v := os.Getenv("CUA_TASK_TIMEOUT"); v != "" {
@@ -37,6 +41,13 @@ func GetMaxIdleWaitTime() time.Duration {
 		}
 	}
 	return DefaultMaxIdleWaitTime
+}
+
+// logInternal 内部日志，走 Logger 回调；未设置则静默
+func logInternal(format string, args ...interface{}) {
+	if Logger != nil {
+		Logger(format, args...)
+	}
 }
 
 // InitCUAClient 初始化 Lumi CUA 客户端
@@ -66,7 +77,7 @@ func WaitForIdle(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, sandbo
 	for {
 		isIdle, err := client.CheckIdle(ctx, sandboxID)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "检查空闲状态失败: %v\n", err)
+			logInternal("检查空闲状态失败: %v\n", err)
 		}
 		if isIdle {
 			return nil
@@ -104,7 +115,7 @@ func RunTask(ctx context.Context, client *lumi_cua_sdk.LumiCuaClient, prompt, sa
 	steps := 0
 	for message := range messageChan {
 		steps++
-		fmt.Fprintf(os.Stderr, "[步骤 %d] %s | %s\n", steps, message.Action, message.Summary)
+		logInternal("[步骤 %d] %s | %s\n", steps, message.Action, message.Summary)
 
 		switch message.Action {
 		case "error":

@@ -49,16 +49,14 @@ Agent 用多模态能力分析用户上传的产品图，输出：
 bash $SKILL_DIR/scripts/start.sh
 ```
 
-### Step 4：调用 ecom 二进制（多 Tab 并行生成）
-
-每个 `--prompt` 对应一个 Chrome Tab，多个方案一次调用并行生图：
+### Step 4：调用 ecom 二进制
 
 ```bash
 $SKILL_DIR/scripts/build/ecom \
   --images "img1.png,img2.png" \
   --prompt "English prompt for scheme 1" \
   --prompt "English prompt for scheme 2" \
-  --prompt "English prompt for scheme 3" \
+  --prompt "English prompt for scheme 3"
 ```
 
 **CLI 参数**：
@@ -70,30 +68,38 @@ $SKILL_DIR/scripts/build/ecom \
 
 **ecom 二进制内部流程**：
 
-| 阶段 | 步骤 | 目标 | 说明 |
-|------|------|------|------|
-| 准备 | Step 0 | 上传产品图到 CDN | Go HTTP 直传，非 CUA |
-| 准备 | Step 1 | 创建沙箱 input/output 目录 | CUA 执行 PowerShell |
-| 准备 | Step 2 | 下载产品图到沙箱 input 目录 | CUA 执行 PowerShell |
-| 生图 | Step 3a — 批量提交 | 在 N 个 Tab 中各提交一个 Gemini 请求 | 依次打开 Tab → 新会话 → 上传图 → 选 Create images → 输入 Prompt → 提交，**不等结果直接下一个** |
-| 生图 | Step 3b — 批量等待 | 轮询检查所有 Tab 直到全部生成完成 | Ctrl+Tab 循环切换，每个 Tab 滚动检查是否有生成图片（每个 Tab 生成一张） |
-| 生图 | Step 3c — 批量下载 | 逐 Tab 保存生成图片到统一 output 目录 | 每个 Tab 保存一张 Gemini 生成图（非上传图），右键另存到 output 目录 |
-| 清理 | Step 3d — 关闭 Tab | 关闭所有 Gemini Tab | Ctrl+W 逐个关闭，保留一个空白 Tab 防止 Chrome 退出 |
-| 上传 | Step 4 | 通过 upload.mjs 上传 output 到 CDN | CUA 执行 PowerShell |
-| 查询 | Step 5 | 查询 CDN 获取生成图 URL | Go HTTP 查询 |
+| 步骤 | 执行者 | 目标 | 说明 |
+|------|--------|------|------|
+| Step 0 | Go HTTP | 上传产品图到 CDN | 直传，非 CUA |
+| Step 1 | CUA → PowerShell 脚本 | 建目录 + 下载图片 + 设置 Chrome 下载路径 + 开 N 个 Gemini Tab | 调用沙箱内置 `ecom_init.ps1 -TaskId '<id>' -TabCount N`，脚本会自动将 Chrome 默认下载路径设为 output 目录 |
+| Step 2a | CUA → Gemini UI | 逐 Tab 上传图 + 提交 prompt | Tab 已由脚本打开，CUA 只需逐 Tab 上传+提交，不等结果 |
+| Step 2b | CUA → Gemini UI | 轮询等待生成完成 | Ctrl+Tab 循环切换，每个 Tab 滚动检查（每 Tab 一张图） |
+| Step 2c | CUA → Gemini UI | 逐 Tab 用 hover 下载按钮下载生成图 | hover 图片显示浮层按钮 → 点击下载按钮（向下箭头图标），文件自动保存到 output 目录（Chrome 下载路径已由 ecom_init.ps1 预设） |
+| Step 2d | CUA → Gemini UI | 关闭所有 Gemini Tab | Ctrl+W 逐个关闭，保留一个空白 Tab（非致命） |
+| Step 3 | CUA → PowerShell | upload.mjs 上传 output 到 CDN | `node upload.mjs --dir <cdn_dir> <output>` |
+| Step 4 | Go HTTP | 查询 CDN 获取生成图 URL | 查询后输出 JSON 结果 |
 
-**多 Tab 并行的优势**：
-- N 个方案的 Gemini 生成同时进行，总耗时约等于单方案的耗时
-- 相比逐方案串行执行（N × 单方案时间），节约约 5 分钟以上
+**沙箱内置脚本 `ecom_init.ps1`**：
+
+```powershell
+C:\Users\ecs\Desktop\tools\ecom_init.ps1 -TaskId '<taskId>' -TabCount <N>
+```
+
+脚本职责：
+1. 创建 `C:\Users\ecs\Desktop\temp\<TaskId>\input` 和 `output` 目录
+2. 通过 CDN 查询接口获取 input 目录文件列表，逐文件下载到沙箱 input 目录
+3. 关闭 Chrome → 修改 Chrome Preferences 将默认下载路径设为 output 目录并禁用下载路径询问 → 重新启动 Chrome
+4. 循环 `Start-Process chrome` 打开 N 个 gemini.google.com Tab
 
 **重试策略**：
 
 | 失败阶段 | 重试方式 | 重试次数 |
 |----------|---------|---------|
-| 3a 提交失败 | 3a+3b+3c 整体重试 | ≤ 2 次 |
-| 3b 等待超时 | 3a+3b+3c 整体重试 | ≤ 2 次 |
-| 3c 下载失败 | 仅重试 3c（图已生成） | 先重试 3c 1 次，仍失败则整体重试 |
-| 3d 清理失败 | 不重试，仅 stderr 记录 | 非致命，不影响结果 |
+| Step 1 脚本失败 | 不重试，直接报错 | 0 |
+| 2a 提交失败 | 2a+2b+2c 整体重试 | ≤ 2 次 |
+| 2b 等待超时 | 2a+2b+2c 整体重试 | ≤ 2 次 |
+| 2c 下载失败 | 仅重试 2c（图已生成） | 先重试 2c 1 次，仍失败则整体重试 |
+| 2d 清理失败 | 不重试，仅 stderr 记录 | 非致命，不影响结果 |
 
 ### Step 5：汇总展示结果
 
@@ -108,44 +114,42 @@ $SKILL_DIR/scripts/build/ecom \
 |------|---|------|
 | 单任务超时 | 600s | 单个 CUA 子任务的执行上限（可通过环境变量 `CUA_TASK_TIMEOUT` 覆盖） |
 | 空闲等待 | 120s | 等待沙箱空闲的上限（可通过环境变量 `CUA_IDLE_WAIT` 覆盖） |
-| Gemini 重试 | 2 次 | 3a+3b 组合失败时整体重试，3c 单独重试 1 次 |
+| Gemini 重试 | 2 次 | 2a+2b 组合失败时整体重试，2c 单独重试 1 次 |
 
 ## CUA Prompt 编写约束
 
 以下是已知的 CUA 行为边界 case，Go 代码中的 Prompt builder 已内置这些约束。
 如果需要手动编写或调试 Prompt，**必须**包含以下要点：
 
-### 1. 新会话 + 多 Tab（子任务 3a 包含）
-每个方案在独立的 Chrome Tab 中执行，每个 Tab 使用全新的 Gemini 会话：
-- Tab 1：直接在当前标签页导航到 gemini.google.com，点击 "New chat"
-- Tab 2+：通过 Ctrl+T 新开标签页，导航到 gemini.google.com，点击 "New chat"
-- 每个 Tab 独立会话，不复用上下文
-- 提交 Prompt 后**不等结果**，立即处理下一个 Tab
+### 1. Tab 已由脚本打开（子任务 2a 前提）
+- `ecom_init.ps1` 已打开 N 个 gemini.google.com Tab
+- CUA 不需要再开 Tab 或导航到 Gemini
+- 直接在已有 Tab 中操作，用 Ctrl+Tab 切换
 
-### 2. 上传图片 + 选择生图模式（子任务 3a 中每个 Tab 都执行）
-在每个 Tab 的新会话中，必须依次完成：
-- **上传产品图**：点击附件/图片上传按钮，导航到 input 目录，选中目录下**所有**图片文件
+### 2. 上传图片 + 选择生图模式（子任务 2a 中每个 Tab 都执行）
+- **上传产品图**：点击附件/图片上传按钮，在弹出的文件选择对话框中，**在地址栏手动输入 input 目录完整路径**后回车导航，再 Ctrl+A 全选所有图片文件并确认
 - **选择 "Create images" 模式**：点击 "Create images" 选项进入图片生成模式
 - 两步都完成后，再在输入框中输入英文 Prompt 并提交
 - 如果未选择 "Create images"，Gemini 可能只做文本回复而不生图
 
-### 3. 滚动检查（子任务 3b 包含）
+### 3. 滚动检查（子任务 2b 包含）
 轮询所有 Tab 检查生成状态：
 - 使用 Ctrl+Tab 在各 Tab 间循环切换
 - 每个 Tab 向下滚动页面，检查是否有一张生成图片出现在 "Show thinking" 下方
 - 仍在加载的 Tab 跳过，稍后再来检查
 - 所有 Tab 都显示生成完成后结束等待
 
-### 4. 下载各 Tab 生成图片到指定目录（子任务 3c 包含）
-逐 Tab 保存 Gemini 生成的图片到统一 output 目录（每个 Tab 一张生成图）：
+### 4. 用 hover 下载按钮下载生成图（子任务 2c 包含）
+逐 Tab 下载 Gemini 生成的高清原图（每个 Tab 一张生成图）：
 - **区分上传图和生成图**：上传图在用户消息气泡中（对话顶部，用户头像旁）；生成图在 Gemini 回复区（"Show thinking" 下方，sparkle 图标旁）
-- 仅保存 Gemini 生成图，不保存用户上传的产品图
-- 右键该生成图 → "Save image as" → 在保存对话框地址栏中**手动输入 output 目录路径**后回车 → 保存
-- **不保存到 Downloads 或任何默认文件夹**，必须保存到指定的 output 目录
-- 所有 Tab 的生成图都保存到同一个 output 目录
-- 全部保存完成后，通过 PowerShell `ls` 验证 output 目录中的文件数量
+- 仅下载 Gemini 生成图，不下载用户上传的产品图
+- **hover 生成图**，图片右上角会出现两个浮层按钮（复制和下载），**点击下载按钮**（右侧向下箭头图标）
+- **不要使用右键 "Save image as"**——右键保存的是浏览器渲染的缩略图，分辨率低；hover 下载按钮下载的才是高清原图
+- Chrome 默认下载路径已由 `ecom_init.ps1` 预设为 output 目录，点击下载后文件**自动保存到 output**，无需手动指定路径
+- 所有 Tab 的生成图都自动保存到同一个 output 目录
+- 全部下载完成后，通过 PowerShell `ls` 验证 output 目录中的文件数量
 
-### 5. 关闭所有 Tab（子任务 3d 包含）
+### 5. 关闭所有 Tab（子任务 2d 包含）
 生图完成后清理 Chrome 标签：
 - 使用 Ctrl+W 逐个关闭所有 Gemini Tab
 - 如果 Chrome 只剩最后一个 Tab，保留一个空白 Tab 避免 Chrome 退出
@@ -157,13 +161,14 @@ $SKILL_DIR/scripts/build/ecom \
 |---------|---------|
 | 产品图上传 CDN 失败 | 检查网络，通知用户上传失败 |
 | 无法识别产品品类 | 按通用策略生成，不阻塞流程 |
-| 3a 批量提交失败 | 整体重试 3a+3b+3c（含重试上限 2 次） |
-| 3b 等待超时 | 整体重试 3a+3b+3c |
-| 3c 下载失败 | 先单独重试 3c 1 次，仍失败则整体重试 |
-| 3d 清理 Tab 失败 | 非致命，仅 stderr 记录，不影响结果 |
+| ecom_init.ps1 脚本执行失败 | 直接报错，不重试 |
+| Chrome Preferences 修改失败 | 非致命，脚本会打印 Warning 继续执行；2c 下载时文件可能落到 Downloads，需要注意 |
+| 2a 批量提交失败 | 整体重试 2a+2b+2c（含重试上限 2 次） |
+| 2b 等待超时 | 整体重试 2a+2b+2c |
+| 2c 下载失败 | 先单独重试 2c 1 次，仍失败则整体重试 |
+| 2d 清理 Tab 失败 | 非致命，仅 stderr 记录，不影响结果 |
 | 生成结果与 Sanrio 角色不符 | Agent 检查截图，描述偏差，优化 Prompt 中角色描述后重试 |
 | upload.mjs 上传失败 | 检查沙箱 Node.js 环境，通知用户 |
 | CDN 查询无文件 | 看截图判断 output/ 是否有文件生成 |
 | 未选择 Create images 导致纯文本回复 | 重试时确保先点击 Create images 再提交 |
-| 部分 Tab 的图片未保存 | 重新切到对应 Tab，补充保存遗漏的图片 |
-| 图片保存到错误目录 | 重试 3c，确保在保存对话框中手动输入 output 路径 |
+| hover 下载按钮不可见/不可点击 | 尝试滚动使图片完全可见后重新 hover；仍失败则 fallback 到右键另存为 |
