@@ -1,10 +1,9 @@
 // src/core/self-iteration/iteration-checker.ts
-// 迭代检查器 (V5) — 薄 checker，只负责发现 + 派发 SubAgent
+// 迭代检查器 (V5.1) — 薄 checker，只负责发现 + 派发 SubAgent
 //
-// V5 核心变化：
-//   - 不再预读 trace / 格式化文本 / 拼接上下文
-//   - 只做：发现有 trace 的 Skill → 判断类型 → 把路径传给 SubAgent
-//   - SubAgent 自行读取 trace 文件 + session history + SKILL.md
+// V5.1 修复：
+//   - discoverSkillsWithTraces / processSkill 改为查找前一天的 trace 文件
+//     0:10 触发时日期已翻到新一天，需要分析的是前一天积累的 trace
 
 import {
   existsSync,
@@ -30,10 +29,11 @@ import { SESSIONS_ROOT } from '../../utils/paths.js'
 const TIMEZONE = 'Asia/Shanghai'
 
 /**
- * 获取当前中国标准时间的 YYYY-MM-DD 日期字符串
+ * 获取前一天的中国标准时间 YYYY-MM-DD 日期字符串
  */
-function getChinaDate(): string {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: TIMEZONE })
+function getYesterdayChinaDate(): string {
+  const yesterday = new Date(Date.now() - 86_400_000)
+  return yesterday.toLocaleDateString('sv-SE', { timeZone: TIMEZONE })
 }
 
 export class IterationChecker {
@@ -78,13 +78,13 @@ export class IterationChecker {
 
   private async processSkill(skillName: string): Promise<NightlySkillReport> {
     try {
-      const today = getChinaDate()
+      const yesterday = getYesterdayChinaDate()
       const skillDir = join(SKILLS_DIR, skillName)
-      const traceFile = join(skillDir, 'iteration', 'traces', `${today}.jsonl`)
+      const traceFile = join(skillDir, 'iteration', 'traces', `${yesterday}.jsonl`)
 
       // 无 trace 则跳过
       if (!existsSync(traceFile)) {
-        return { skillName, tracesAnalyzed: 0, action: 'skipped', reason: 'No traces today' }
+        return { skillName, tracesAnalyzed: 0, action: 'skipped', reason: `No traces for ${yesterday}` }
       }
 
       // 判断 Skill 类型
@@ -101,7 +101,7 @@ export class IterationChecker {
         `traceFile: ${traceFile}`,
         `sessionsDir: ${SESSIONS_ROOT}`,
         `skillType: ${typeLabel}`,
-        `date: ${today}`,
+        `date: ${yesterday}`,
       ].join('\n')
 
       const systemPrompt = personal
@@ -156,14 +156,14 @@ export class IterationChecker {
   private discoverSkillsWithTraces(): string[] {
     if (!existsSync(SKILLS_DIR)) return []
 
-    const today = getChinaDate()
+    const yesterday = getYesterdayChinaDate()
 
     try {
       return readdirSync(SKILLS_DIR, { withFileTypes: true })
         .filter(e => e.isDirectory())
         .filter(e => {
-          const todayTrace = join(SKILLS_DIR, e.name, 'iteration', 'traces', `${today}.jsonl`)
-          return existsSync(todayTrace)
+          const traceFile = join(SKILLS_DIR, e.name, 'iteration', 'traces', `${yesterday}.jsonl`)
+          return existsSync(traceFile)
         })
         .map(e => e.name)
     } catch {

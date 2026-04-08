@@ -638,11 +638,6 @@ private async handleNewCommand(message: FeishuMessage): Promise<void> {
           resolve();
         }
       }, 100);
-
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        resolve();
-      }, 30000);
     });
   }
 
