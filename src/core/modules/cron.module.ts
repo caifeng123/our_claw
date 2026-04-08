@@ -7,13 +7,14 @@ export function createCronModule(cronScheduler: CronScheduler): Module {
     priority: 80,
 
     async onInit() {
-      // CronScheduler 在构造时已 start()
       console.log('⏰ [CronModule] Scheduler initialized')
     },
 
     async onReady() {
-      // 可在此注册需要其他服务就绪后才能执行的 cron jobs
-      console.log('⏰ [CronModule] Scheduler ready')
+      // 所有模块就绪、Bridge 已注入后，才启动调度器
+      // start() 会加载系统任务 + 用户任务到 TimerMap，并执行 recover 补偿
+      await cronScheduler.start()
+      console.log('⏰ [CronModule] Scheduler started')
     },
 
     async onShutdown() {

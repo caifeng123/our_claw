@@ -20,6 +20,7 @@ const maxGeminiRetries = 2
 const productFidelityPrefix = `Keep the product from the uploaded photo exactly as-is: ` +
 	`preserve its exact shape, proportions, colors, character design, and every surface detail. ` +
 	`Do NOT redraw, simplify, stylize, or alter the product in any way. ` +
+	`Ignore and remove any watermarks or overlay text from the uploaded photo — the generated image must be clean with no watermarks. ` +
 	`Only change the background, lighting, and surrounding scene elements. ` +
 	`The product must look identical to the uploaded reference photo. `
 

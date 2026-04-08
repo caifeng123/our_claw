@@ -18,7 +18,11 @@ export function getSystemJobs(): CronJob[] {
 
 /**
  * Skill 自迭代任务
- * 每天凌晨 0 点执行，扫描所有 Skill 的 trace 进行自动优化
+ * 每天凌晨 0:10 执行，扫描所有 Skill 的前一天 trace 进行自动优化
+ *
+ * 为什么是 0:10 而非 0:00？
+ *   0:00 触发时日期已翻到新一天，而 trace 文件以日期命名（YYYY-MM-DD.jsonl），
+ *   需要查找的是前一天的 trace。0:10 留出缓冲，确保前一天的 trace 已完整写入。
  */
 function createSelfIterationJob(): CronJob {
   const config: SelfIterationConfig = {
@@ -29,7 +33,7 @@ function createSelfIterationJob(): CronJob {
     // 定义层
     id: '__system_self_iteration__',
     name: 'Skill 自迭代优化',
-    cron: '0 0 * * *',
+    cron: '10 0 * * *',
     taskType: 'self_iteration',
     taskConfig: config,
     target: '',  // self_iteration 的结果由 executor 内部处理推送
