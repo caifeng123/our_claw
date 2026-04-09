@@ -14,7 +14,7 @@ const (
 	DefaultManagerURL = "https://iaas-cua-devbox-ecs-manager-v2.byted.org/mgr"
 	DefaultPlannerURL = "https://iaas-cua-devbox-planner-agent.byted.org/planner"
 
-	DefaultTaskTimeoutSeconds = 600
+	DefaultTaskTimeoutSeconds = 1500
 	DefaultIdlePollInterval   = 5 * time.Second
 	DefaultMaxIdleWaitTime    = 120 * time.Second
 )
