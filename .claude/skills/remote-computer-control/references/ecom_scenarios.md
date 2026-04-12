@@ -104,14 +104,6 @@ C:\Users\ecs\Desktop\tools\ecom_init.ps1 -TaskId '<taskId>' -TabCount <N>
 - 让用户选择满意的结果
 - 不满意可指定方向调整 Prompt 重新生成
 
-## 超时配置
-
-| 参数 | 值 | 说明 |
-|------|---|------|
-| 单任务超时 | 600s | 单个 CUA 子任务的执行上限（可通过环境变量 `CUA_TASK_TIMEOUT` 覆盖） |
-| 空闲等待 | 120s | 等待沙箱空闲的上限（可通过环境变量 `CUA_IDLE_WAIT` 覆盖） |
-| Gemini 重试 | 2 次 | 2a+2b 组合失败时整体重试，2c 单独重试 1 次 |
-
 ## CUA Prompt 编写约束
 
 以下是已知的 CUA 行为边界 case，Go 代码中的 Prompt builder 已内置这些约束。

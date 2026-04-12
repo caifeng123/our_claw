@@ -4,7 +4,9 @@
       "WebFetch",
       "Bash",
       "Skill",
-      "Read"
+      "Read",
+      "Write",
+      "Edit"
     ]
   }
 }

@@ -108,22 +108,33 @@ $SKILL_DIR/scripts/build/task --prompt "Prompt含{IMAGE_URL}" --images "/path/to
 }
 ```
 
-### 4. 结果验证 — 用 Read 工具看截图
+### 4. 结果验证 — 三层判断逻辑
 
-**直接用 `Read` 工具读取截图文件，Claude 原生多模态能力即可看到画面内容。**
+> **关键：TaskOutput.status 不可信，必须用 exit_code + JSON success 双重判断。**
+>
+> 已知 Bug：Go 二进制正常执行完毕后，TaskOutput.status 经常返回 "error"，但实际任务成功。
+> 这是一个已确认的系统级问题（跨多个 session、多种场景持续复现），不可依赖。
 
-验证逻辑：
+**判断流程：**
 
-| JSON `success` | 截图判断 | 处理 |
-|---|---|---|
-| `false` | 不需要看截图 | 执行出错（沙箱故障/超时），直接向用户报告 `error` 内容 |
-| `true` | **必须看截图** | `success:true` 仅代表"执行完成没崩溃"，不代表目标达成 |
+```
+Step A: 检查 exit_code
+  └─ exit_code != 0 → 真正失败，报告 error 内容
+  └─ exit_code == 0 → 进入 Step B
 
-**当 `success: true` 时，对比截图与用户原始意图：**
+Step B: 解析 stdout JSON，检查 success 字段
+  └─ success == false → 执行出错，报告 error 内容
+  └─ success == true  → 进入 Step C（截图验证）
 
-- **截图符合用户意图** → 进入步骤 5 发送截图
-- **截图不符合用户意图** → 分析偏差原因，优化 Prompt 重试（回到步骤 2，≤3 次）
-- **判定无法完成** → 发送截图 + 文字说明原因
+Step C: 用 Read 工具查看截图，对比用户原始意图
+  └─ 截图符合意图 → 进入步骤 5 发送截图
+  └─ 截图不符合意图 → 分析偏差，优化 Prompt 重试（≤3 次）
+  └─ 判定无法完成 → 发送截图 + 文字说明原因
+```
+
+**⚠️ 严禁以下做法：**
+- 仅凭 `TaskOutput.status == "error"` 就判定任务失败
+- 在 `exit_code == 0` 且 `success == true` 的情况下向用户报告错误
 
 ### 5. 发送截图给用户
 
@@ -137,7 +148,9 @@ send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
 
 | 场景 | 处理方式 |
 |------|---------|
-| `success: false` + `error` 非空 | 直接向用户报告错误原因，不截图验证 |
+| `exit_code != 0` | 真正的执行失败，向用户报告错误原因 |
+| `exit_code == 0` + `success: false` | 执行完成但任务目标未达成，报告 error 内容 |
+| `exit_code == 0` + `success: true` + `TaskOutput.status == "error"` | **任务成功**，忽略 TaskOutput.status，正常走截图验证流程 |
 | 沙箱不存在 / 连接失败 | 通知用户"远程沙箱不可用"，建议检查沙箱状态 |
 | Planner 服务繁忙 | Go 二进制内部自动等待轮询，超时后 JSON 返回错误 |
 | 任务执行超时（>600s） | JSON 返回 `success:false`，向用户报告超时 |
