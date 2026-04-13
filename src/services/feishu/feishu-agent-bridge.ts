@@ -13,6 +13,7 @@ import { FeishuService, FeishuSendError } from './feishu-service.js';
 import { StreamingCardRenderer } from './streaming-card-renderer.js';
 import type { FeishuConnectionConfig, FeishuMessage, ThreadContext } from './types.js';
 import { formatMentionsForPrompt } from './mention-utils.js';
+import type { CliProfileManager } from "./cli-profile-manager.js";
 import { getAgentEngine } from '../../core/agent-registry.js';
 import type { EventHandlers } from '@/core/agent/types/agent.js';
 import { writeFileSync, existsSync, readdirSync } from 'fs';
@@ -44,6 +45,8 @@ export interface FeishuAgentBridgeConfig {
   showTypingIndicator?: boolean;
   /** 是否启用流式卡片 (Create + Patch)，默认 false */
   enableStreamingCard?: boolean;
+  /** CliProfileManager 实例（传入则启用多用户授权拦截） */
+  profileManager?: CliProfileManager;
 }
 
 
@@ -72,6 +75,7 @@ export class FeishuAgentBridge {
   private isConnected = false;
   private processingChats = new Set<string>();
   private activeRenderers = new Map<string, StreamingCardRenderer>();
+  private profileManager: CliProfileManager | null = null;
 
   constructor(config: FeishuAgentBridgeConfig) {
     this.claudeEngine = new ClaudeEngine()
@@ -84,6 +88,8 @@ export class FeishuAgentBridge {
     };
 
     this.feishuService = new FeishuService(config.feishu);
+
+    this.profileManager = config.profileManager ?? null;
   }
 
   /**
@@ -453,6 +459,14 @@ private async handleNewCommand(message: FeishuMessage): Promise<void> {
     if (command === '/stop') {
       await this.handleStopCommand(message);
       return;
+    }
+
+
+    // ─── 静默确保用户 cli profile 已初始化（不拦截、不触发授权）───
+    if (this.profileManager) {
+      this.profileManager.ensureProfile(message.senderId).catch(err => {
+        console.warn(`⚠️ [ensureProfile] ${message.senderId}: ${err.message}`);
+      });
     }
 
     const processingKey = message.threadId ? `${message.chatId}:${message.threadId}` : message.chatId;
@@ -900,7 +914,8 @@ ${originalContent}
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
 
-    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext);
+    const cliEnv = this.profileManager?.getCliEnv(message.senderId);
+    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext, cliEnv);
   }
 
   /**
@@ -939,7 +954,8 @@ ${originalContent}
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
 
-    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext);
+    const cliEnv = this.profileManager?.getCliEnv(message.senderId);
+    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext, cliEnv);
   }
 
   /**
@@ -949,7 +965,8 @@ ${originalContent}
     const isNewSession = !getAgentEngine().hasResumeSession(sessionId);
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
-    const response = await getAgentEngine().sendMessage(sessionId, enrichedContent, message.senderId, sessionContext);
+    const cliEnv = this.profileManager?.getCliEnv(message.senderId);
+    const response = await getAgentEngine().sendMessage(sessionId, enrichedContent, message.senderId, sessionContext, cliEnv);
 
     const replyMessageId = message.threadId ? message.messageId : undefined;
 

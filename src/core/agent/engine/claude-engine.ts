@@ -66,7 +66,9 @@ export class ClaudeEngine {
     mergedOptions?: MergedQueryOptions,
     skipResume?: boolean,
   ) {
-    const { model, env } = this.config
+    const { model, env: baseEnv } = this.config
+    // ─── 合并请求级 env（多用户 cli 环境隔离） ───
+    const env = mergedOptions?.env ? { ...baseEnv, ...mergedOptions.env } : baseEnv
 
     // ─── 合并 allowedTools ───
     const allowedTools = [

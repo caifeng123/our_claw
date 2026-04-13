@@ -160,6 +160,7 @@ export class AgentEngine {
     message: string,
     userId?: string,
     sessionContext?: string,
+    envOverrides?: Record<string, string>,
   ): Promise<AgentResponse> {
     try {
       let session = this.sessionManager.getSession(sessionId)
@@ -182,10 +183,14 @@ export class AgentEngine {
         resumeMode: true,
       })
 
+      // [MODULE-SYSTEM] 从 Registry 获取合并后的 SDK Slots
+      const mergedOptions = this.registry.buildQueryOptions(envOverrides ? { env: envOverrides } : undefined)
+
       const response = await this.claudeEngine.sendMessage(
         message,
         finalSystemPrompt,
         sessionId,
+        mergedOptions,
       )
 
       const assistantMessage: SimpleMessage = { role: 'assistant', content: response.content }
@@ -207,6 +212,7 @@ export class AgentEngine {
     userId?: string,
     eventHandlers?: EventHandlers,
     sessionContext?: string,
+    envOverrides?: Record<string, string>,
   ): Promise<void> {
     const abortController = new AbortController()
     this.abortControllers.set(sessionId, abortController)
@@ -246,7 +252,7 @@ export class AgentEngine {
       this.streamHandler.setEventHandlers(wrappedHandlers)
 
       // [MODULE-SYSTEM] 从 Registry 获取合并后的 SDK Slots
-      const mergedOptions = this.registry.buildQueryOptions()
+      const mergedOptions = this.registry.buildQueryOptions(envOverrides ? { env: envOverrides } : undefined)
 
       const responseContent = await this.claudeEngine.sendMessageStream(
         message,

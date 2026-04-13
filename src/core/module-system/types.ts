@@ -82,6 +82,8 @@ export interface Module {
   allowedTools?: string[]
   /** 系统 prompt 追加片段 */
   systemPromptExtension?: string
+  /** 额外环境变量（多用户 cli 环境隔离） */
+  env?: Record<string, string>
 
   // ─── 流式事件装饰器（可选）───
 
@@ -118,6 +120,8 @@ export interface MergedQueryOptions {
   tools: any[]
   allowedTools: string[]
   systemPromptExtension: string
+  /** 额外环境变量，会合并到 Agent 进程的 env 中（用于多用户 cli 环境隔离） */
+  env?: Record<string, string>
 }
 
 /**
@@ -135,4 +139,6 @@ export interface QueryOptionsOverrides {
   allowedTools?: string[]
   /** 追加 systemPromptExtension */
   systemPromptExtension?: string
+  /** 额外环境变量（多用户 cli 环境隔离） */
+  env?: Record<string, string>
 }

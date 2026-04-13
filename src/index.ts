@@ -12,6 +12,8 @@
  */
 
 import './env-setup.js'
+import { CliProfileManager } from "./services/feishu/cli-profile-manager.js";
+import { UserTokenProbe } from "./services/feishu/user-token-probe.js";
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
@@ -42,45 +44,70 @@ app.route('/api/memory', memoryRouter)
 // 飞书服务
 // ════════════════════════════════════════
 
+
+/** 全局 UserTokenProbe 实例，供 shutdown 时 stop */
+let tokenProbe: UserTokenProbe | null = null;
+
 async function initializeFeishuService(): Promise<boolean> {
   const feishuConfig = getFeishuConfig()
   const validation = validateFeishuConfig(feishuConfig)
 
   if (!validation.valid) {
-    console.warn('⚠️ 飞书配置验证失败:', validation.errors.join(', '))
+    console.warn("⚠️ 飞书配置验证失败:", validation.errors.join(", "))
     return false
   }
 
   if (!feishuConfig.enabled) {
-    console.log('ℹ️ 飞书集成已禁用，跳过初始化')
+    console.log("ℹ️ 飞书集成已禁用，跳过初始化")
     return false
   }
 
-  console.log('🚀 初始化飞书Agent桥接服务...')
+  console.log("🚀 初始化飞书Agent桥接服务...")
 
   try {
+    // ─── 1. 创建 CliProfileManager ───
+    const profileManager = new CliProfileManager({
+      appId: feishuConfig.appId,
+      appSecret: feishuConfig.appSecret,
+      brand: "feishu",
+    })
+    console.log("✅ CliProfileManager 初始化完成")
+
+    // ─── 2. 启动飞书桥接（注入 profileManager） ───
     const success = await startDefaultFeishuBridge({
       feishu: {
         appId: feishuConfig.appId,
         appSecret: feishuConfig.appSecret,
       },
+      profileManager,
       ...feishuConfig.bridge,
     })
 
     if (!success) {
-      console.error('❌ 飞书Agent桥接服务启动失败')
+      console.error("❌ 飞书Agent桥接服务启动失败")
+      return false
     }
 
-    return success
+    // ─── 3. 启动多用户心跳探活 ───
+    tokenProbe = new UserTokenProbe({
+      profileManager,
+      intervalMs: 24 * 60 * 60 * 1000,      // 24h
+      retryIntervalMs: 30 * 60 * 1000,       // 30min
+      maxConsecutiveFails: 3,
+      onAlert: async (openId, message) => {
+        console.error(`🚨 [TokenProbe] ${message}`)
+        // 可选：通过飞书 bot 发消息通知管理员
+      },
+    })
+    tokenProbe.start()
+    console.log("✅ UserTokenProbe 心跳探活已启动")
+
+    return true
   } catch (error) {
-    console.error('❌ 飞书服务初始化失败:', error)
+    console.error("❌ 飞书服务初始化失败:", error)
     return false
   }
 }
-
-// ════════════════════════════════════════
-// 优雅关闭
-// ════════════════════════════════════════
 
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n🛑 收到${signal}信号，正在优雅关闭...`)
@@ -88,6 +115,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // [MODULE-SYSTEM] 通过 Registry 关闭所有模块（包括 CronScheduler）
   await agentEngine.registry.shutdown()
 
+  // 停止心跳探活
+  if (tokenProbe) tokenProbe.stop()
   await stopDefaultFeishuBridge()
   console.log('✅ 服务已关闭')
   process.exit(0)

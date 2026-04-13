@@ -304,13 +304,17 @@ export class ModuleRegistry {
       }
     }
 
+
+    // ─── env: 合并覆盖 ───
+    const mergedEnv = overrides?.env ? overrides.env : undefined
     return {
       hooks: mergedHooks,
       agents: mergedAgents,
       canUseTool: chainedCanUseTool,
       tools: mergedTools,
       allowedTools: [...allowedToolsSet],
-      systemPromptExtension: promptParts.join('\n\n'),
+      systemPromptExtension: promptParts.join("\n\n"),
+      ...(mergedEnv ? { env: mergedEnv } : {}),
     }
   }
 
