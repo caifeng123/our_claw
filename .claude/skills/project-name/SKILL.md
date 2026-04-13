@@ -166,7 +166,6 @@ python3 <skill_path>/scripts/holiday_engine.py \
     │   └── hello_kitty_watch_001.json
     └── cache/                          ← 运行缓存
         ├── last_holidays.json
-        └── last_titles.json
 ```
 
 ### 节日数据文件
@@ -303,7 +302,6 @@ MY、PH 节日有更新，已重新生成标题（SG/TH/VN 无变化，跳过）
 ```
 
 
-将脚本输出的节日 JSON 保存为新的缓存（覆盖 `cache/last_holidays.json`），同时保存标题到 `cache/last_titles.json`。
 
 ---
 
