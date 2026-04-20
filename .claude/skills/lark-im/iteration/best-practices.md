@@ -23,3 +23,9 @@
 - **推荐做法**: 首先使用Read工具读取`../lark-shared/SKILL.md`，了解user/bot身份区别、权限要求和认证流程
 - **证据**:
   - [2026-04-01] 两个trace都在第一步读取了lark-shared/SKILL.md，确保正确理解身份和权限要求
+
+### 搜索@自己的消息时直接使用--query配合自己的名字
+- **场景**: 需要快速查找别人@自己的消息时
+- **推荐做法**: 使用`lark-cli im +messages-search --query "@自己名字" --as user`直接搜索，无需先获取发送者open_id
+- **证据**:
+  - [2026-04-16] session=feishu_oc_dbd1e613d846dd602c27b245577a8f61, 使用`--query "@自己名字"`成功搜索到所有@自己的消息，比先查发送者open_id再用`--sender`更高效
