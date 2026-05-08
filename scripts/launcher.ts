@@ -179,6 +179,12 @@ class Launcher {
 
     if (this.isShuttingDown || this.isRestarting) return;
 
+    // ★ 配置类错误 fail-fast,不 retry 不回滚(例如 lark-cli 授权失败/超时)
+    if (code === 2) {
+      console.error('❌ 子进程报告配置错误（code=2），需人工修复后重启，Launcher 退出');
+      process.exit(2);
+    }
+
     if (code === 0) {
       console.log('🔄 子进程正常退出，准备重启...');
       this.performRestart().catch((err) => {

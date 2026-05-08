@@ -1,29 +1,30 @@
 /**
- * CliProfileManager — 多用户 lark-cli 环境隔离管理
+ * CliProfileManager — 单用户 lark-cli 环境隔离管理
  *
- * 为每个用户创建独立 lark-cli 环境：
- *   data/cli-profiles/{openId}/config/   → config.json
- *   data/cli-profiles/{openId}/data/     → 加密 token 存储
+ * 全局共享一个 lark-cli profile（统一 openId = 'system'）：
+ *   data/cli-profiles/system/config/   → config.json
+ *   data/cli-profiles/system/data/     → 加密 token 存储
+ *
+ * 不同项目通过各自仓库下的 data/cli-profiles/ 天然隔离，
+ * 不依赖 lark-cli 默认目录（~/.config/lark-cli），避免跨项目串数据。
  *
  * 职责：
- *   1. ensureProfile(openId) — 创建用户目录 + lark-cli config init（幂等）
- *   2. getCliEnv(openId)     — 返回 env vars，供 Agent 执行 cli 命令时注入
- *   3. isAuthorized(openId)  — 检查用户是否已授权
- *   4. verifyAndRefresh(openId) — 触发 token 续期（心跳用）
- *   5. getAllUserIds()        — 列出所有已注册用户
- *
- * 授权流程不由本模块发起，而是由 Agent 在执行 lark-cli 命令遇到
- * "No user logged in" 时，按 lark-shared skill 指导自然触发：
- *   lark-cli auth login --recommend --json &
+ *   1. ensureProfile(openId)        — 创建目录 + lark-cli config init（幂等）
+ *   2. getCliEnv(openId)            — 返回 env vars，供 Agent 执行 cli 命令时注入
+ *   3. isAuthorized(openId)         — 检查是否已授权
+ *   4. ensureLogin(openId, onUrl)   — 启动期主动触发授权,抠 verification URL 推到回调
+ *   5. verifyAndRefresh(openId)     — 触发 token 续期（心跳用）
+ *   6. getAllUserIds()              — 列出所有已注册 profile（单用户模式下通常仅 'system'）
  */
 
 import { promisify } from 'node:util';
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const execAsync = promisify(exec);
 const CLI_TIMEOUT = 30_000;
+const LOGIN_TIMEOUT = 5 * 60_000;
 
 export interface CliProfileManagerOptions {
   appId: string;
@@ -122,7 +123,7 @@ export class CliProfileManager {
     try {
       if (!existsSync(this.profilesRoot)) return [];
       return readdirSync(this.profilesRoot, { withFileTypes: true })
-        .filter(d => d.isDirectory() && d.name.startsWith('ou_'))
+        .filter(d => d.isDirectory())
         .map(d => d.name);
     } catch {
       return [];
@@ -148,6 +149,87 @@ export class CliProfileManager {
       const msg = error instanceof Error ? error.message : String(error);
       return { success: false, error: msg };
     }
+  }
+
+  /**
+   * 启动期主动触发授权 —— spawn lark-cli auth login --json,
+   * 解析 NDJSON 输出拿到 verification_uri_complete,通过 onUrl 推到调用方,
+   * 等待 cli 进程退出。
+   *
+   * exit 0  → token 落盘成功
+   * 非 0    → throw
+   * 超时    → throw(默认 5 分钟)
+   */
+  async ensureLogin(
+    openId: string,
+    onUrl: (url: string) => void | Promise<void>,
+  ): Promise<void> {
+    const env = { ...process.env, ...this.getCliEnv(openId) };
+
+    return new Promise<void>((resolveFn, rejectFn) => {
+      const child = spawn(
+        'lark-cli',
+        ['auth', 'login', '--recommend', '--json'],
+        { env, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+
+      let urlCaptured = false;
+      let stderrBuf = '';
+
+      const extractUrl = (text: string): string | null => {
+        for (const line of text.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) continue;
+          try {
+            const obj = JSON.parse(trimmed);
+            const url = obj?.verification_uri_complete ?? obj?.verification_uri ?? obj?.url;
+            if (typeof url === 'string' && /^https?:\/\//i.test(url)) return url;
+          } catch {
+            // 非 JSON 行,忽略
+          }
+        }
+        return null;
+      };
+
+      const tryCaptureUrl = async (text: string) => {
+        if (urlCaptured) return;
+        const url = extractUrl(text);
+        if (!url) return;
+        urlCaptured = true;
+        try {
+          await onUrl(url);
+        } catch (e) {
+          console.warn('⚠️ [CliProfileManager] onUrl 回调失败:', e);
+        }
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        void tryCaptureUrl(chunk.toString());
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderrBuf += chunk.toString();
+      });
+
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        rejectFn(new Error(`lark-cli auth login 超时(${LOGIN_TIMEOUT / 1000}s),用户未在限期内完成授权`));
+      }, LOGIN_TIMEOUT);
+
+      child.on('exit', (code) => {
+        clearTimeout(timer);
+        if (code === 0) {
+          console.log(`✅ [CliProfileManager] ${openId} 授权完成`);
+          resolveFn();
+        } else {
+          rejectFn(new Error(`lark-cli auth login 退出 code=${code}\nstderr: ${stderrBuf.trim()}`));
+        }
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        rejectFn(err);
+      });
+    });
   }
 
   private getUserDir(openId: string): string {

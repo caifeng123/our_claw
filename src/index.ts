@@ -73,6 +73,30 @@ async function initializeFeishuService(): Promise<boolean> {
     })
     console.log("✅ CliProfileManager 初始化完成")
 
+    // ─── 1.1 启动期：确保 system profile 已初始化 ───
+    await profileManager.ensureProfile("system")
+
+    // ─── 1.2 启动期：校验 system 用户是否已登录、token 是否有效 ───
+    const authorized = await profileManager.isAuthorized("system")
+    if (!authorized) {
+      console.log("🔐 lark-cli (system) 未登录或 token 已过期,启动期触发授权流程...")
+      try {
+        await profileManager.ensureLogin("system", async (url) => {
+          console.log("\n" + "=".repeat(80))
+          console.log(`🔗 请在浏览器打开以下链接完成授权(5 分钟内有效):`)
+          console.log(`   ${url}`)
+          console.log("=".repeat(80) + "\n")
+        })
+        console.log("✅ lark-cli (system) 首次授权成功")
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error(`🚫 lark-cli (system) 授权失败:${msg}`)
+        process.exit(2)   // 配置类错误,Launcher 不要 retry
+      }
+    } else {
+      console.log("✅ lark-cli (system) token 有效")
+    }
+
     // ─── 2. 启动飞书桥接（注入 profileManager） ───
     const success = await startDefaultFeishuBridge({
       feishu: {

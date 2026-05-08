@@ -27,6 +27,12 @@ import type { ImageAnalysisEntry } from '../../core/memory/conversation-store.js
 // 状态文件路径
 const STATE_FILE = '.restart-state.json';
 
+/**
+ * 单用户模式：所有消息共用同一个 lark-cli profile
+ * profile 目录:data/cli-profiles/system/
+ */
+const SYSTEM_OPEN_ID = 'system';
+
 // 重启状态接口
 interface RestartState {
   chatIds: string[];
@@ -462,10 +468,10 @@ private async handleNewCommand(message: FeishuMessage): Promise<void> {
     }
 
 
-    // ─── 静默确保用户 cli profile 已初始化（不拦截、不触发授权）───
+    // ─── 静默确保 system cli profile 已初始化（不拦截、不触发授权）───
     if (this.profileManager) {
-      this.profileManager.ensureProfile(message.senderId).catch(err => {
-        console.warn(`⚠️ [ensureProfile] ${message.senderId}: ${err.message}`);
+      this.profileManager.ensureProfile(SYSTEM_OPEN_ID).catch(err => {
+        console.warn(`⚠️ [ensureProfile] system: ${err.message}`);
       });
     }
 
@@ -914,7 +920,7 @@ ${originalContent}
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
 
-    const cliEnv = this.profileManager?.getCliEnv(message.senderId);
+    const cliEnv = this.profileManager?.getCliEnv(SYSTEM_OPEN_ID);
     await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext, cliEnv);
   }
 
@@ -954,7 +960,7 @@ ${originalContent}
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
 
-    const cliEnv = this.profileManager?.getCliEnv(message.senderId);
+    const cliEnv = this.profileManager?.getCliEnv(SYSTEM_OPEN_ID);
     await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext, cliEnv);
   }
 
@@ -965,7 +971,7 @@ ${originalContent}
     const isNewSession = !getAgentEngine().hasResumeSession(sessionId);
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
-    const cliEnv = this.profileManager?.getCliEnv(message.senderId);
+    const cliEnv = this.profileManager?.getCliEnv(SYSTEM_OPEN_ID);
     const response = await getAgentEngine().sendMessage(sessionId, enrichedContent, message.senderId, sessionContext, cliEnv);
 
     const replyMessageId = message.threadId ? message.messageId : undefined;
