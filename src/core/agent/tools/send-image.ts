@@ -21,8 +21,12 @@ export function createSendImageTool() {
       }
 
       // ====== 预校验 ======
+      // 注意: 远程 URL 不再做扩展名校验 —— TOS 等图床的模板尾巴(~tplv-xxx.image)、
+      //       签名 query、无扩展名 CDN 都会让扩展名白名单失效。
+      //       URL 是否真为图片由 uploader 内部 probe(HEAD/Range GET)决定。
       for (const fp of file_paths) {
-        if (!isHttpUrl(fp) && !fs.existsSync(fp)) {
+        if (isHttpUrl(fp)) continue
+        if (!fs.existsSync(fp)) {
           return { success: false, error: `File not found: ${fp}` }
         }
         if (!isUploadable(fp)) {

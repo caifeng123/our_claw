@@ -76,6 +76,12 @@ export interface FeishuServiceConfig {
 export interface ImageUploadOptions {
   timeout?: number;       // 超时时间（毫秒）
   maxFileSize?: number;   // 最大文件大小（字节）
+  /**
+   * 调用方已知的 content-type(由 probe 阶段拿到)。
+   * 若提供且为飞书支持类型,可跳过响应头白名单校验,
+   * 避免在已经 HEAD 过的情况下因 CDN 返回头不一致被二次拒绝。
+   */
+  expectedContentType?: string;
 }
 
 // 图片上传结果

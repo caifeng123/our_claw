@@ -885,11 +885,24 @@ ${originalContent}
           }
         } else {
           // 🔧 修复：完成前将本地图片路径/URL 转为飞书 image_key
-          // 流式过程中图片显示为"图片加载中..."占位符，此处统一处理后再渲染最终卡片
+          // 流式过程中图片显示为占位符，此处统一处理后再渲染最终卡片
           const processed = await this.feishuService.processContentWithImages(fullResponse);
           if (processed.imageKeys.length > 0) {
-            renderer.replaceContentText(processed.processedText);
-            fullResponse = processed.processedText;
+            let finalText = processed.processedText;
+
+            // 飞书卡片 markdown 不支持 ![alt](img_key) 渲染图片。
+            // 需要: 1) 从正文中移除 ![](img_key) 语法
+            //        2) 将 img_key 注册为独立的 img 元素块
+            for (const key of processed.imageKeys) {
+              // 移除正文中的 ![...](img_key)，避免飞书报错
+              const mdImgRe = new RegExp(`!\\[[^\\]]*\\]\\(${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\s*`, 'g');
+              finalText = finalText.replace(mdImgRe, '');
+              // 注册为 img 元素块（卡片中独立渲染）
+              renderer.registerImage(key, 'image');
+            }
+
+            renderer.replaceContentText(finalText.trim());
+            fullResponse = finalText.trim();
           }
           if (processed.errors.length > 0) {
             console.warn('⚠️ 部分图片上传失败:', processed.errors);

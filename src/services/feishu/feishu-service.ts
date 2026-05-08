@@ -15,6 +15,8 @@ import type {
 import { fileURLToPath } from 'url';
 import { IdentityResolver } from './identity-resolver.js';
 import { parseMentions, isBotMentioned as checkBotMentioned } from './mention-utils.js';
+import { extractImageCandidates, type ImageCandidate } from './image-extractor.js';
+import { probeRemoteImage, probeLocalImage, isFeishuSupportedMime } from './image-probe.js';
 
 // AI 修复重试配置
 const AI_FIX_MAX_RETRIES = 2; // AI 修复最大重试次数
@@ -1088,10 +1090,11 @@ export class FeishuService implements FeishuConnection {
         return { success: false, error: `File too large: ${stats.size} bytes (max: ${maxFileSize} bytes)` };
       }
 
-      const ext = extname(filePath).toLowerCase();
-      const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'];
-      if (!allowedExtensions.includes(ext)) {
-        return { success: false, error: `Unsupported file type: ${ext}` };
+      // 优先用调用方提供的 content-type(已 probe 过),否则按 mime 推断
+      const trustedCT = options?.expectedContentType?.toLowerCase();
+      const contentType = trustedCT || (mime.getType(filePath) ?? undefined);
+      if (!isFeishuSupportedMime(contentType)) {
+        return { success: false, error: `Unsupported file type: ${contentType ?? extname(filePath)}` };
       }
 
       const fileBuffer = readFileSync(filePath);
@@ -1141,6 +1144,9 @@ export class FeishuService implements FeishuConnection {
       'image/webp',
       'image/svg+xml',
     ];
+    // 若调用方已通过 probe 拿到可信 content-type,响应头校验直接放行
+    const trustedCT = options?.expectedContentType?.toLowerCase();
+    const skipHeaderCheck = !!trustedCT && allowedContentTypes.includes(trustedCT);
 
     try {
       const controller = new AbortController();
@@ -1162,7 +1168,7 @@ export class FeishuService implements FeishuConnection {
       }
 
       const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
-      if (contentType && !allowedContentTypes.includes(contentType)) {
+      if (!skipHeaderCheck && contentType && !allowedContentTypes.includes(contentType)) {
         return { success: false, error: `Unsupported content type: ${contentType}` };
       }
 
@@ -1212,97 +1218,101 @@ export class FeishuService implements FeishuConnection {
   }
 
   /**
-   * 处理文本内容，自动检测并上传图片（支持本地路径和远程URL）
+   * 处理文本内容,自动检测并上传图片(支持本地路径和远程URL)
+   *
+   * 流程:
+   *   1. extractImageCandidates: 从 markdown / html / 裸 URL / 本地路径中抽出候选,
+   *      raw 字段保留原文中的完整子串。
+   *   2. 对每个候选独立 probe(URL 走 HEAD,本地走 mime),
+   *      非图片 / 不支持的 content-type 直接跳过,留原文。
+   *   3. 上传成功的候选,以 raw 为单位做字符串替换 —— 由于 raw 来自原文,
+   *      天然对齐,无需复杂正则。
    */
   async processContentWithImages(text: string): Promise<ContentProcessResult> {
-    const imageKeys: string[] = [];
-    const errors: string[] = [];
-
-    const IMG_EXT = 'jpg|jpeg|png|gif|bmp|webp|svg';
-
-    const pathPattern = new RegExp(
-      `(?:https?|file):\\/\\/[^\\s\\)"'<>]+\\.(?:${IMG_EXT})(?:\\?[^\\s\\)"'<>]*)?` +
-      `|[a-zA-Z]:\\\\[^\\s\\)"'<>]+\\.(?:${IMG_EXT})` +
-      `|\\.{0,2}[\\\\\/][^\\s\\)"'<>]+\\.(?:${IMG_EXT})` +
-      `|[a-zA-Z][a-zA-Z0-9_-]*[\\\\/][^\\s\\)"'<>]+\\.(?:${IMG_EXT})`,
-      'gi'
-    );
-
-    const allPaths = [...new Set(text.match(pathPattern) || [])];
-    if (allPaths.length === 0) {
+    const candidates = extractImageCandidates(text);
+    if (candidates.length === 0) {
       return { processedText: text, imageKeys: [], errors: [] };
     }
 
-    const replacements = new Map<string, string>();
+    type Resolved = { raw: string; imageKey?: string; error?: string };
 
-    await Promise.all(allPaths.map(async (imgPath) => {
-      try {
-        const result = await this.resolveAndUpload(imgPath);
-        if (result.success && result.imageKey) {
-          replacements.set(imgPath, result.imageKey);
-          imageKeys.push(result.imageKey);
-        } else {
-          errors.push(`Upload failed: ${imgPath} - ${result.error}`);
+    const resolved: Resolved[] = await Promise.all(
+      candidates.map(async (c: ImageCandidate): Promise<Resolved> => {
+        try {
+          if (c.kind === 'url') {
+            // 1. file:// 走本地分支
+            if (c.raw.startsWith('file://')) {
+              const localPath = fileURLToPath(c.raw);
+              const probe = probeLocalImage(localPath);
+              if (!probe.ok || !isFeishuSupportedMime(probe.contentType)) {
+                return { raw: c.raw, error: probe.error ?? `Unsupported: ${probe.contentType}` };
+              }
+              const r = await this.uploadImage(localPath, { expectedContentType: probe.contentType });
+              return r.success && r.imageKey
+                ? { raw: c.raw, imageKey: r.imageKey }
+                : { raw: c.raw, error: r.error };
+            }
+
+            // 2. http(s) 远程
+            const probe = await probeRemoteImage(c.raw);
+            if (!probe.ok) {
+              return { raw: c.raw, error: probe.error ?? 'probe failed' };
+            }
+            if (!isFeishuSupportedMime(probe.contentType)) {
+              return { raw: c.raw, error: `Feishu unsupported content-type: ${probe.contentType}` };
+            }
+            const r = await this.uploadImageFromUrl(c.raw, { expectedContentType: probe.contentType });
+            return r.success && r.imageKey
+              ? { raw: c.raw, imageKey: r.imageKey }
+              : { raw: c.raw, error: r.error };
+          }
+
+          // 3. 本地路径(可能是相对/绝对)
+          const resolvedPath = this.findImageFile(c.raw);
+          if (!resolvedPath) {
+            return { raw: c.raw, error: `File not found: ${c.raw}` };
+          }
+          const probe = probeLocalImage(resolvedPath);
+          if (!probe.ok || !isFeishuSupportedMime(probe.contentType)) {
+            return { raw: c.raw, error: probe.error ?? `Unsupported: ${probe.contentType}` };
+          }
+          const r = await this.uploadImage(resolvedPath, { expectedContentType: probe.contentType });
+          return r.success && r.imageKey
+            ? { raw: c.raw, imageKey: r.imageKey }
+            : { raw: c.raw, error: r.error };
+        } catch (e) {
+          return { raw: c.raw, error: e instanceof Error ? e.message : 'Unknown error' };
         }
-      } catch (e) {
-        errors.push(`Error: ${imgPath} - ${e instanceof Error ? e.message : 'Unknown'}`);
+      })
+    );
+
+    const replacements = new Map<string, string>();
+    const errors: string[] = [];
+    const imageKeys: string[] = [];
+
+    for (const r of resolved) {
+      if (r.imageKey) {
+        replacements.set(r.raw, r.imageKey);
+        imageKeys.push(r.imageKey);
+      } else if (r.error) {
+        errors.push(`Upload failed: ${r.raw} - ${r.error}`);
       }
-    }));
+    }
 
     if (replacements.size === 0) {
       return { processedText: text, imageKeys: [], errors };
     }
 
-    const sorted = [...replacements.keys()]
-      .sort((a, b) => b.length - a.length);
-
-    const escaped = sorted
-      .map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-
-    const masterPattern = new RegExp(
-      `(!\\[[^\\]]*\\]\\()` +
-      `(${escaped.join('|')})` +
-      `(\\))` +
-      `|(<img\\s[^>]*?src=["'])` +
-      `(${escaped.join('|')})` +
-      `(["'][^>]*?>)` +
-      `|(${escaped.join('|')})`,
-      'gi'
-    );
-
-    const processedText = text.replace(masterPattern, (...args) => {
-      if (args[1] && args[2]) {
-        const key = replacements.get(args[2]);
-        return key ? `${args[1]}${key}${args[3]}` : args[0];
-      }
-      if (args[4] && args[5]) {
-        const key = replacements.get(args[5]);
-        return key ? `${args[4]}${key}${args[6]}` : args[0];
-      }
-      if (args[7]) {
-        const key = replacements.get(args[7]);
-        return key ? `![](${key})` : args[0];
-      }
-      return args[0];
-    });
+    // 按 raw 长度倒序,避免短串先替吃掉长串前缀
+    const ordered = [...replacements.keys()].sort((a, b) => b.length - a.length);
+    let processedText = text;
+    for (const raw of ordered) {
+      const key = replacements.get(raw)!;
+      // raw 来自原文 split,精确字符串替换即可
+      processedText = processedText.split(raw).join(key);
+    }
 
     return { processedText, imageKeys, errors };
-  }
-
-  private async resolveAndUpload(imagePath: string): Promise<ImageUploadResult> {
-    if (imagePath.startsWith('file://')) {
-      const localPath = fileURLToPath(imagePath);
-      return this.uploadImage(localPath);
-    } else if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-      return this.uploadImageFromUrl(imagePath);
-    } else {
-      // 多路径搜索：依次在可能的位置查找文件
-      const resolvedPath = this.findImageFile(imagePath);
-      if (!resolvedPath) {
-        return { success: false, error: `File not found in any search path: ${imagePath}` };
-      }
-      return this.uploadImage(resolvedPath);
-    }
   }
 
   /**

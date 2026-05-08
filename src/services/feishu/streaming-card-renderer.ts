@@ -488,6 +488,18 @@ export class StreamingCardRenderer {
     // ====== 3. 回答内容 ======
     if (this.state.contentText) {
       let content = this.state.contentText
+
+      // 飞书卡片 markdown 的 ![alt](xxx) 会把 xxx 当 img_key 解析。
+      // 如果 xxx 是 URL(尚未替换为 img_key),会导致 "invalid image keys" 报错。
+      // 在 streaming 期间(phase != completed),将 ![alt](url) 转为纯文本占位,
+      // 最终 onContentStop 时 processContentWithImages 会做正式的 URL→img_key 替换。
+      if (!isFinished) {
+        content = content.replace(
+          /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g,
+          '🖼️ [$1]($2)'
+        )
+      }
+
       if (isFinished && this.mentionUserId) {
         content = `<at id=${this.mentionUserId}></at> ` + content
       }
