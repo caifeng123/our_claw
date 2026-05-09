@@ -11,6 +11,7 @@
  *   - 新增 ClaudeEngineBridge 注入，修复 self_iteration 定时任务无法执行的 Bug
  */
 
+import './instrumentation.js'   // ⭐ 必须最先,初始化 OTel + Langfuse
 import './env-setup.js'
 import { CliProfileManager } from "./services/feishu/cli-profile-manager.js";
 import { UserTokenProbe } from "./services/feishu/user-token-probe.js";

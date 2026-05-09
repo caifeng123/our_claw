@@ -8,7 +8,8 @@
  *   - Resume 失败自动降级为新对话（清除过期映射后重试）
  */
 
-import { query, type Options } from '@anthropic-ai/claude-agent-sdk'
+import { query } from '../../../instrumentation.js'
+import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentResponse, EventHandlers } from '../types/agent'
 import { ToolManager } from './tool-manager'
 import { SessionIdStore } from './session-id-store'
