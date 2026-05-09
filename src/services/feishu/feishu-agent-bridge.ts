@@ -501,6 +501,10 @@ private async handleNewCommand(message: FeishuMessage): Promise<void> {
             message.senderName = userInfo.name;
             console.log(`👤 发信人身份已解析: ${message.senderId} → ${userInfo.name}`);
           }
+          // 提取用户名,供 Langfuse 等监控系统按 user 维度聚合
+          if (userInfo?.name) {
+            message.senderEmailPrefix = userInfo.name;
+          }
         } catch (err) {
           console.warn(`⚠️ 解析发信人身份失败: ${message.senderId}`, err);
         }
@@ -934,7 +938,9 @@ ${originalContent}
     const enrichedContent = this.buildEnrichedContent(message);
 
     const cliEnv = this.profileManager?.getCliEnv(SYSTEM_OPEN_ID);
-    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext, cliEnv);
+    // 监控用 userId:优先邮箱前缀,缺失时回退 openId
+    const traceUserId = message.senderEmailPrefix ?? message.senderId;
+    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, traceUserId, eventHandlers, sessionContext, cliEnv);
   }
 
   /**
@@ -974,7 +980,8 @@ ${originalContent}
     const enrichedContent = this.buildEnrichedContent(message);
 
     const cliEnv = this.profileManager?.getCliEnv(SYSTEM_OPEN_ID);
-    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, message.senderId, eventHandlers, sessionContext, cliEnv);
+    const traceUserId = message.senderEmailPrefix ?? message.senderId;
+    await getAgentEngine().sendMessageStream(sessionId, enrichedContent, traceUserId, eventHandlers, sessionContext, cliEnv);
   }
 
   /**
@@ -985,7 +992,8 @@ ${originalContent}
     const sessionContext = this.buildSessionContext(message, isNewSession);
     const enrichedContent = this.buildEnrichedContent(message);
     const cliEnv = this.profileManager?.getCliEnv(SYSTEM_OPEN_ID);
-    const response = await getAgentEngine().sendMessage(sessionId, enrichedContent, message.senderId, sessionContext, cliEnv);
+    const traceUserId = message.senderEmailPrefix ?? message.senderId;
+    const response = await getAgentEngine().sendMessage(sessionId, enrichedContent, traceUserId, sessionContext, cliEnv);
 
     const replyMessageId = message.threadId ? message.messageId : undefined;
 

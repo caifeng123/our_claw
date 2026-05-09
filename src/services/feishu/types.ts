@@ -47,6 +47,12 @@ export interface FeishuMessage {
 
   /** 下载到本地后的文件路径列表（由 bridge 层填充） */
   downloadedPaths?: string[];
+
+  /**
+   * 发信人邮箱前缀(e.g. xxx@bytedance.com → xxx),由 IdentityResolver 解析填充。
+   * 用于 Langfuse 等监控系统按 user 维度聚合,缺失时回退到 senderId。
+   */
+  senderEmailPrefix?: string;
 }
 
 export interface ThreadContext {

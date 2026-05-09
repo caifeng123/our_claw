@@ -17,6 +17,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.0.2
         version: 2.0.2(hono@4.12.4)
+      '@langfuse/core':
+        specifier: ^5.3.0
+        version: 5.3.0(@opentelemetry/api@1.9.1)
       '@langfuse/otel':
         specifier: ^5.3.0
         version: 5.3.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.7.1(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.217.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.1))

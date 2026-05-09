@@ -49,6 +49,7 @@ import type {
   EventHandlers,
   SessionState,
 } from './types/agent.js'
+import { withAgentTrace } from '../../instrumentation.js'
 
 interface SimpleMessage {
   role: 'user' | 'assistant'
@@ -162,45 +163,50 @@ export class AgentEngine {
     sessionContext?: string,
     envOverrides?: Record<string, string>,
   ): Promise<AgentResponse> {
-    try {
-      let session = this.sessionManager.getSession(sessionId)
-      if (!session) {
-        session = this.sessionManager.createSession({ sessionId, userId })
-      }
+    return withAgentTrace(
+      { userId, sessionId },
+      async () => {
+        try {
+          let session = this.sessionManager.getSession(sessionId)
+          if (!session) {
+            session = this.sessionManager.createSession({ sessionId, userId })
+          }
 
-      const userMessage: SimpleMessage = { role: 'user', content: message }
-      this.sessionManager.addMessage(sessionId, userMessage)
+          const userMessage: SimpleMessage = { role: 'user', content: message }
+          this.sessionManager.addMessage(sessionId, userMessage)
 
-      const systemPromptResult = this.contextBuilder.buildSystemPrompt()
-      const finalSystemPrompt = sessionContext
-        ? `${systemPromptResult.text}\n\n${sessionContext}`
-        : systemPromptResult.text
+          const systemPromptResult = this.contextBuilder.buildSystemPrompt()
+          const finalSystemPrompt = sessionContext
+            ? `${systemPromptResult.text}\n\n${sessionContext}`
+            : systemPromptResult.text
 
-      console.log(`📊 System prompt 构建完成 [session=${sessionId}]:`, {
-        systemPromptTokens: systemPromptResult.stats.totalTokens,
-        memoryCount: systemPromptResult.stats.memoryCount,
-        hasSessionContext: !!sessionContext,
-        resumeMode: true,
-      })
+          console.log(`📊 System prompt 构建完成 [session=${sessionId}]:`, {
+            systemPromptTokens: systemPromptResult.stats.totalTokens,
+            memoryCount: systemPromptResult.stats.memoryCount,
+            hasSessionContext: !!sessionContext,
+            resumeMode: true,
+          })
 
-      // [MODULE-SYSTEM] 从 Registry 获取合并后的 SDK Slots
-      const mergedOptions = this.registry.buildQueryOptions(envOverrides ? { env: envOverrides } : undefined)
+          // [MODULE-SYSTEM] 从 Registry 获取合并后的 SDK Slots
+          const mergedOptions = this.registry.buildQueryOptions(envOverrides ? { env: envOverrides } : undefined)
 
-      const response = await this.claudeEngine.sendMessage(
-        message,
-        finalSystemPrompt,
-        sessionId,
-        mergedOptions,
-      )
+          const response = await this.claudeEngine.sendMessage(
+            message,
+            finalSystemPrompt,
+            sessionId,
+            mergedOptions,
+          )
 
-      const assistantMessage: SimpleMessage = { role: 'assistant', content: response.content }
-      this.sessionManager.addMessage(sessionId, assistantMessage)
+          const assistantMessage: SimpleMessage = { role: 'assistant', content: response.content }
+          this.sessionManager.addMessage(sessionId, assistantMessage)
 
-      return response
-    } catch (error) {
-      console.error('Agent消息处理错误:', error)
-      throw new Error(`Agent处理失败: ${error instanceof Error ? error.message : '未知错误'}`)
-    }
+          return response
+        } catch (error) {
+          console.error('Agent消息处理错误:', error)
+          throw new Error(`Agent处理失败: ${error instanceof Error ? error.message : '未知错误'}`)
+        }
+      },
+    )
   }
 
   /**
@@ -221,70 +227,75 @@ export class AgentEngine {
     const ctx = this.registry.createQueryContext(sessionId, message)
     ctx.abortController = abortController
 
-    try {
-      let session = this.sessionManager.getSession(sessionId)
-      if (!session) {
-        session = this.sessionManager.createSession({ sessionId, userId })
-      }
+    return withAgentTrace(
+      { userId, sessionId },
+      async () => {
+        try {
+          let session = this.sessionManager.getSession(sessionId)
+          if (!session) {
+            session = this.sessionManager.createSession({ sessionId, userId })
+          }
 
-      const userMessage: SimpleMessage = { role: 'user', content: message }
-      this.sessionManager.addMessage(sessionId, userMessage)
+          const userMessage: SimpleMessage = { role: 'user', content: message }
+          this.sessionManager.addMessage(sessionId, userMessage)
 
-      // [MODULE-SYSTEM] 执行所有模块的 onBeforeQuery
-      await this.registry.beforeQuery(ctx)
+          // [MODULE-SYSTEM] 执行所有模块的 onBeforeQuery
+          await this.registry.beforeQuery(ctx)
 
-      const systemPromptResult = this.contextBuilder.buildSystemPrompt()
-      const finalSystemPrompt = sessionContext
-        ? `${systemPromptResult.text}\n\n${sessionContext}`
-        : systemPromptResult.text
+          const systemPromptResult = this.contextBuilder.buildSystemPrompt()
+          const finalSystemPrompt = sessionContext
+            ? `${systemPromptResult.text}\n\n${sessionContext}`
+            : systemPromptResult.text
 
-      console.log(`📊 System prompt 构建完成(流式) [session=${sessionId}]:`, {
-        systemPromptTokens: systemPromptResult.stats.totalTokens,
-        memoryCount: systemPromptResult.stats.memoryCount,
-        hasSessionContext: !!sessionContext,
-        resumeMode: true,
-      })
+          console.log(`📊 System prompt 构建完成(流式) [session=${sessionId}]:`, {
+            systemPromptTokens: systemPromptResult.stats.totalTokens,
+            memoryCount: systemPromptResult.stats.memoryCount,
+            hasSessionContext: !!sessionContext,
+            resumeMode: true,
+          })
 
-      // [MODULE-SYSTEM] 通过 Registry 构建装饰器链（替代手动 wrapWithTraceCollector）
-      const rawHandlers = eventHandlers || this.streamHandler.getEventHandlers()
-      const wrappedHandlers = this.registry.buildHandlers(rawHandlers, ctx)
+          // [MODULE-SYSTEM] 通过 Registry 构建装饰器链（替代手动 wrapWithTraceCollector）
+          const rawHandlers = eventHandlers || this.streamHandler.getEventHandlers()
+          const wrappedHandlers = this.registry.buildHandlers(rawHandlers, ctx)
 
-      this.streamHandler.setEventHandlers(wrappedHandlers)
+          this.streamHandler.setEventHandlers(wrappedHandlers)
 
-      // [MODULE-SYSTEM] 从 Registry 获取合并后的 SDK Slots
-      const mergedOptions = this.registry.buildQueryOptions(envOverrides ? { env: envOverrides } : undefined)
+          // [MODULE-SYSTEM] 从 Registry 获取合并后的 SDK Slots
+          const mergedOptions = this.registry.buildQueryOptions(envOverrides ? { env: envOverrides } : undefined)
 
-      const responseContent = await this.claudeEngine.sendMessageStream(
-        message,
-        wrappedHandlers,
-        finalSystemPrompt,
-        abortController,
-        sessionId,
-        mergedOptions,  // 传入 Registry 合并的选项
-      )
+          const responseContent = await this.claudeEngine.sendMessageStream(
+            message,
+            wrappedHandlers,
+            finalSystemPrompt,
+            abortController,
+            sessionId,
+            mergedOptions,  // 传入 Registry 合并的选项
+          )
 
-      const assistantMessage: SimpleMessage = { role: 'assistant', content: responseContent }
-      this.sessionManager.addMessage(sessionId, assistantMessage)
+          const assistantMessage: SimpleMessage = { role: 'assistant', content: responseContent }
+          this.sessionManager.addMessage(sessionId, assistantMessage)
 
-      // [MODULE-SYSTEM] 执行所有模块的 onAfterQuery（内部自动 dispose ctx）
-      await this.registry.afterQuery(ctx)
-    } catch (error) {
-      if (abortController.signal.aborted) {
-        console.log(`⏹️ 会话 ${sessionId} 已被用户中断`)
-        // [MODULE-SYSTEM] 中断时也要清理 ctx
-        this.registry.abortQuery(sessionId)
-        return
-      }
-      console.error('Agent流式消息处理错误:', error)
-      this.streamHandler.handleEvent({
-        type: 'error',
-        error: `Agent流式处理失败: ${error instanceof Error ? error.message : '未知错误'}`,
-      })
-      // [MODULE-SYSTEM] 异常时清理
-      this.registry.abortQuery(sessionId)
-    } finally {
-      this.abortControllers.delete(sessionId)
-    }
+          // [MODULE-SYSTEM] 执行所有模块的 onAfterQuery（内部自动 dispose ctx）
+          await this.registry.afterQuery(ctx)
+        } catch (error) {
+          if (abortController.signal.aborted) {
+            console.log(`⏹️ 会话 ${sessionId} 已被用户中断`)
+            // [MODULE-SYSTEM] 中断时也要清理 ctx
+            this.registry.abortQuery(sessionId)
+            return
+          }
+          console.error('Agent流式消息处理错误:', error)
+          this.streamHandler.handleEvent({
+            type: 'error',
+            error: `Agent流式处理失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          })
+          // [MODULE-SYSTEM] 异常时清理
+          this.registry.abortQuery(sessionId)
+        } finally {
+          this.abortControllers.delete(sessionId)
+        }
+      },
+    )
   }
 
   // ==================== 工具管理 ====================

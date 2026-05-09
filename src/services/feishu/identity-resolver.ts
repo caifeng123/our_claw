@@ -138,6 +138,28 @@ export class IdentityResolver {
   }
 
   /**
+   * 解析为 Langfuse / 监控用的稳定 user 标识。
+   * 优先级:邮箱前缀 (xxx@bytedance.com → xxx) > 英文名 > 中文姓名 > openId 兜底。
+   *
+   * 用于 langfuse trace 的 user_id 维度聚合,避免直接暴露 ou_xxx 这种内部 ID。
+   */
+  async resolveLangfuseUserId(openId: string): Promise<string> {
+    if (!openId) return 'unknown'
+    try {
+      const info = await this.resolveUser(openId)
+      if (info?.email) {
+        const prefix = info.email.split('@')[0]?.trim()
+        if (prefix) return prefix
+      }
+      if (info?.enName) return info.enName
+      if (info?.name) return info.name
+    } catch {
+      // fallthrough to openId
+    }
+    return openId
+  }
+
+  /**
    * 手动将已知信息写入缓存（如从 mention 事件中获得的姓名）
    * 不覆盖已有的更完整记录
    */
