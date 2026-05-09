@@ -18,21 +18,22 @@
     "memory:dump": "tsx scripts/memory-cli.ts dump"
   },
   "devDependencies": {
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "@types/jsdom": "^21.1.7",
     "@types/turndown": "^5.0.5",
-    "@types/jsdom": "^21.1.7"
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.79",
+    "@hono/node-server": "^2.0.2",
     "@larksuiteoapi/node-sdk": "^1.60.0",
+    "@mozilla/readability": "^0.5.0",
     "cron-parser": "^4.9.0",
     "dotenv": "^17.3.1",
     "hono": "^4.12.3",
-    "mime": "^4.1.0",
-    "zod": "^4.3.6",
     "jsdom": "^26.1.0",
-    "@mozilla/readability": "^0.5.0",
-    "turndown": "^7.2.0"
+    "mime": "^4.1.0",
+    "turndown": "^7.2.0",
+    "zod": "^4.3.6"
   }
 }

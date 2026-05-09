@@ -17,6 +17,7 @@ import { UserTokenProbe } from "./services/feishu/user-token-probe.js";
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
+import { serve } from '@hono/node-server'
 import agentRouter from './routes/agent.js'
 import feishuRouter from './routes/feishu.js'
 import memoryRouter from './routes/memory.js'
@@ -25,8 +26,7 @@ import { startDefaultFeishuBridge, stopDefaultFeishuBridge } from './services/fe
 import { agentEngine } from './core/agent/index.js'
 import { getDefaultFeishuAgentBridge } from './services/feishu/feishu-agent-bridge.js'
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000
-
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001
 // ─── HTTP 应用 ───
 const app = new Hono()
 
@@ -211,4 +211,6 @@ main().catch((error) => {
   process.exit(1)
 })
 
-export default { port: PORT, fetch: app.fetch }
+serve({ fetch: app.fetch, port: PORT }, (info) => {
+  console.log(`🚀 listening on http://localhost:${info.port}`)
+})
