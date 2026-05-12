@@ -166,8 +166,3 @@ send_image({ file_path: "<screenshot_path>", alt_text: "远程桌面截图" })
 - **远程 OS**：当前仅支持 Windows 沙箱（通过 Lumi CUA ECS 管理）
 - **截图验证**：Claude 直接读截图判断，零额外延迟
 - **超时配置**：单任务默认 600s，空闲等待默认 120s，均可通过环境变量覆盖
-
-## 调用实践
-必须阅读以下内容：
-- 最佳实践(iteration/best-practices.md): 最佳实践
-- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

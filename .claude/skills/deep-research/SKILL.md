@@ -175,8 +175,3 @@ After completing research, you should have:
 5. Current trends and relevant context
 
 **Only then proceed to content generation**, using the gathered information to create high-quality, well-informed content.
-
-## 调用实践
-必须阅读以下内容：
-- 最佳实践(iteration/best-practices.md): 最佳实践
-- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

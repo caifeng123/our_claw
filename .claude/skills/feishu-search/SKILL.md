@@ -131,8 +131,3 @@ lark-cli drive +search --query "OKR" --format json --page-token '<上一次返�
 | 操作 | 所需 scope |
 |---|---|
 | 搜索云空间对象(文档 / Wiki / 表格等资源发现) | `search:docs:read` |
-
-## 调用实践
-必须阅读以下内容：
-- 最佳实践(iteration/best-practices.md): 最佳实践
-- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

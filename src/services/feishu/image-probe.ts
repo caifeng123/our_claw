@@ -53,40 +53,84 @@ export function extFromMime(contentType: string | undefined | null): string | un
 
 /**
  * 探测远程 URL 是否为图片
+ *
+ * 策略:
+ *   1. 先尝试 HEAD —— 大多数 CDN 支持,代价最小。
+ *   2. 部分 CDN(如字节 ImageX / TOS、某些 S3 配置)不支持 HEAD,
+ *      表现为抛错(网络层)或返回 4xx/5xx(应用层 405 / 403 / 501)。
+ *      此时统一降级到 Range GET 0-0 字节,只取 header 即可判定。
+ *   3. Range GET 同样失败时,再用 URL 扩展名兜底。
+ *
+ * 注意: fetch 对 HTTP 错误状态(4xx/5xx)不会 throw,必须显式判 status,
+ *       否则 405 不会触发降级,导致 ImageX 图片被误判为非图片。
  */
 export async function probeRemoteImage(url: string, timeoutMs = 5000): Promise<ProbeResult> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    let res: Response
-    try {
-      res = await fetch(url, { method: 'HEAD', signal: ctrl.signal })
-    } catch {
-      // 部分 CDN 不支持 HEAD,降级到 Range GET
-      res = await fetch(url, {
-        method: 'GET',
-        headers: { Range: 'bytes=0-0' },
-        signal: ctrl.signal,
-      })
-    }
 
-    if (!res.ok && res.status !== 206) {
-      return { ok: false, error: `HTTP ${res.status}` }
-    }
+  // HEAD 不可用的状态码(协议/方法层面拒绝),需降级到 Range GET
+  const shouldFallback = (status: number) =>
+    status === 403 || status === 405 || status === 501 || status === 400
 
+  const isImageFromHeaders = (res: Response): { ok: boolean; contentType?: string } => {
     const ctRaw = res.headers.get('content-type') ?? ''
     const contentType = ctRaw.split(';')[0]?.trim().toLowerCase() || undefined
+    return {
+      ok: !!contentType?.startsWith(IMAGE_MIME_PREFIX),
+      contentType,
+    }
+  }
 
-    if (!contentType?.startsWith(IMAGE_MIME_PREFIX)) {
-      // 没有 content-type 或不是图片时,再用 URL 后缀兜底一次
-      const guessed = mime.getType(url) ?? undefined
-      if (guessed?.startsWith(IMAGE_MIME_PREFIX)) {
-        return { ok: true, contentType: guessed, ext: extFromMime(guessed) }
+  try {
+    // ---- 1) HEAD ----
+    let res: Response | null = null
+    let needFallback = false
+    try {
+      res = await fetch(url, { method: 'HEAD', signal: ctrl.signal })
+      // HEAD 200 但不是 image,也强制降级(部分 CDN 对 HEAD 返回错误页 content-type)
+      if (!res.ok && shouldFallback(res.status)) {
+        needFallback = true
+      } else if (res.ok) {
+        const headJudge = isImageFromHeaders(res)
+        if (!headJudge.ok) needFallback = true
+      } else if (!res.ok && res.status !== 206) {
+        // 其他 HEAD 失败状态(404/500 等)直接报错,不降级
+        return { ok: false, error: `HTTP ${res.status}` }
       }
-      return { ok: false, contentType, error: `Not an image (content-type=${contentType ?? 'unknown'})` }
+    } catch {
+      // 网络层抛错(部分 CDN 直接 reset),降级
+      needFallback = true
     }
 
-    return { ok: true, contentType, ext: extFromMime(contentType) }
+    // ---- 2) Range GET 降级 ----
+    if (needFallback) {
+      try {
+        res = await fetch(url, {
+          method: 'GET',
+          headers: { Range: 'bytes=0-0' },
+          signal: ctrl.signal,
+        })
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'range get failed' }
+      }
+      if (!res.ok && res.status !== 206) {
+        return { ok: false, error: `HTTP ${res.status}` }
+      }
+    }
+
+    // ---- 3) 判定 content-type ----
+    if (!res) return { ok: false, error: 'no response' }
+    const { ok, contentType } = isImageFromHeaders(res)
+    if (ok) {
+      return { ok: true, contentType, ext: extFromMime(contentType) }
+    }
+
+    // 没有 content-type 或不是图片时,再用 URL 后缀兜底一次
+    const guessed = mime.getType(url) ?? undefined
+    if (guessed?.startsWith(IMAGE_MIME_PREFIX)) {
+      return { ok: true, contentType: guessed, ext: extFromMime(guessed) }
+    }
+    return { ok: false, contentType, error: `Not an image (content-type=${contentType ?? 'unknown'})` }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'probe failed' }
   } finally {

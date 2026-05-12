@@ -6,9 +6,6 @@
  *   2. 飞书服务初始化
  *   3. 模块系统生命周期 (init → ready → shutdown)
  *   4. 进程信号处理
- *
- * V6.1 修复：
- *   - 新增 ClaudeEngineBridge 注入，修复 self_iteration 定时任务无法执行的 Bug
  */
 
 import './instrumentation.js'   // ⭐ 必须最先,初始化 OTel + Langfuse
@@ -155,7 +152,7 @@ async function main(): Promise<void> {
   // 1. 飞书服务初始化
   await initializeFeishuService()
 
-  // 1.5 注入 CronExecutor 的 AgentBridge、FeishuBridge 和 ClaudeEngineBridge
+  // 1.5 注入 CronExecutor 的 AgentBridge、FeishuBridge
   const cronExecutor = agentEngine.getCronScheduler().getExecutor()
   cronExecutor.setAgentBridge({
     createSession: (config) => agentEngine.createSession(config),
@@ -163,15 +160,6 @@ async function main(): Promise<void> {
       agentEngine.sendMessage(sessionId, message, userId, sessionContext),
     deleteSession: (sessionId) => agentEngine.deleteSession(sessionId),
   })
-
-  // [FIX] 注入 ClaudeEngineBridge — 供 self_iteration 定时任务使用
-  // IterationChecker 需要底层 ClaudeEngine.sendMessage 来派发 SubAgent
-  const claudeEngine = agentEngine.getClaudeEngine()
-  cronExecutor.setClaudeEngineBridge({
-    sendMessage: (userMessage: string, systemPrompt?: string) =>
-      claudeEngine.sendMessage(userMessage, systemPrompt),
-  })
-  console.log('✅ ClaudeEngineBridge injected for self_iteration')
 
   const feishuBridge = getDefaultFeishuAgentBridge()
   if (feishuBridge) {
@@ -186,7 +174,7 @@ async function main(): Promise<void> {
         }
       },
     })
-    console.log('✅ CronExecutor bridges injected (Agent + Feishu + ClaudeEngine)')
+    console.log('✅ CronExecutor bridges injected (Agent + Feishu)')
   } else {
     console.warn('⚠️ FeishuBridge not available, feishu_notify tasks will fail')
   }

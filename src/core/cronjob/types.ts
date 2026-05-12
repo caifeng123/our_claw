@@ -12,8 +12,8 @@
 /** 用户可选的任务类型 */
 export type UserTaskType = 'agent_prompt' | 'feishu_notify' | 'custom_script'
 
-/** 包含系统内部类型 */
-export type CronTaskType = UserTaskType | 'self_iteration'
+/** 任务类型（保留 alias 以减少调用方改动） */
+export type CronTaskType = UserTaskType
 
 // ─────────────────── 错过补偿策略 ───────────────────
 
@@ -51,15 +51,10 @@ export interface CustomScriptConfig {
   command: string
 }
 
-export interface SelfIterationConfig {
-  skills: string  // 'all' 或逗号分隔的 skill 名
-}
-
 export type TaskConfig =
   | AgentPromptConfig
   | FeishuNotifyConfig
   | CustomScriptConfig
-  | SelfIterationConfig
 
 // ─────────────────── CronJob 主结构 ───────────────────
 
@@ -140,5 +135,4 @@ export const DEFAULT_TIMEOUT_MS: Record<CronTaskType, number> = {
   agent_prompt: 120_000,
   feishu_notify: 15_000,
   custom_script: 30_000,
-  self_iteration: 300_000,
 }

@@ -334,8 +334,3 @@ MY、PH 节日有更新，已重新生成标题（SG/TH/VN 无变化，跳过）
 - 马来西亚市场的双语混合标题，注意马来语和英语的自然衔接
 - 产品特征文件是长期资产，分析要尽量准确详细，后续所有标题生成都依赖它
 - 每年 1 月初需更新 `<skill_dir>/data/holidays_YYYY.json` 中浮动节日的日期并提交 git
-
-## 调用实践
-必须阅读以下内容：
-- 最佳实践(iteration/best-practices.md): 最佳实践
-- 最差实践(iteration/pitfalls.md): 注意避免的错误实践

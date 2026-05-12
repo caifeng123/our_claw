@@ -4,11 +4,7 @@
  * 核心变化：
  *   - 引入 ModuleRegistry，所有模块通过 registry.use() 注册
  *   - buildQueryOptions 由 Registry 自动合并，ClaudeEngine 不再硬编码模块依赖
- *   - wrapWithTraceCollector 迁移到 TraceModule.wrapHandlers
  *   - 入口文件简化为注册 + 生命周期调用
- *
- * V6.1 修复：
- *   - 新增 getClaudeEngine() 方法，供 CronExecutor 注入 ClaudeEngineBridge
  *
  * 兼容性：对外 API 完全不变，内部组装方式从手动 wiring 改为 Module 声明式
  */
@@ -29,15 +25,12 @@ import { calculatorTool, timeTool } from './tools/calculator.js'
 import { createTavilyTools } from './tools/tavily-tools.js'
 import { createLinkAnalyzeTools } from './tools/link-analyze.js'
 import { registerAgentEngine } from '../agent-registry.js'
-import { TraceCollector } from '../self-iteration/trace-collector.js'
 import { ModuleRegistry } from '../module-system/index.js'
 import type { QueryContext } from '../module-system/types.js'
 import {
 
   createImagePipelineTools,
-  createSelfIterationModule,
   createMemoryModule,
-  createTraceModule,
   createBuiltinToolsModule,
   createCronModule,
   createFeishuTransportModule,
@@ -71,9 +64,6 @@ export class AgentEngine {
   // [MODULE-SYSTEM] 模块注册中心
   readonly registry: ModuleRegistry
 
-  // [SELF-ITERATION] Trace 采集
-  private traceCollector: TraceCollector
-
   constructor() {
     // ─── 创建 ModuleRegistry ───
     this.registry = new ModuleRegistry()
@@ -96,9 +86,6 @@ export class AgentEngine {
     this.sessionManager = new SessionManager(this.conversationStore)
     this.streamHandler = new StreamHandler()
 
-    // ─── Trace 采集器 ───
-    this.traceCollector = new TraceCollector()
-
     // ─── 注册到全局 registry ───
     registerAgentEngine(this)
 
@@ -114,7 +101,7 @@ export class AgentEngine {
     // ─── 注册所有 Module ───
     this.registerModules()
 
-    console.log('🤖 Agent引擎 V6.1 初始化完成（模块化架构 + Resume + Skill 自迭代）')
+    console.log('🤖 Agent引擎 V6.1 初始化完成（模块化架构 + Resume）')
   }
 
   /**
@@ -123,13 +110,10 @@ export class AgentEngine {
   private registerModules(): void {
     this.registry
       .use(createFeishuTransportModule())
-
-      .use(createSelfIterationModule())
       .use(createMemoryModule(this.memoryDb, this.conversationStore))
       .use(createBuiltinToolsModule(this.toolManager))
       .use(createCronModule(this.cronScheduler))
       .use(createFeishuRenderModule())
-      .use(createTraceModule(this.traceCollector))
   }
 
   /**
@@ -254,7 +238,7 @@ export class AgentEngine {
             resumeMode: true,
           })
 
-          // [MODULE-SYSTEM] 通过 Registry 构建装饰器链（替代手动 wrapWithTraceCollector）
+          // [MODULE-SYSTEM] 通过 Registry 构建装饰器链
           const rawHandlers = eventHandlers || this.streamHandler.getEventHandlers()
           const wrappedHandlers = this.registry.buildHandlers(rawHandlers, ctx)
 
@@ -378,17 +362,6 @@ export class AgentEngine {
 
   getCronScheduler(): CronScheduler {
     return this.cronScheduler
-  }
-
-  // ==================== ClaudeEngine ====================
-
-  /**
-   * 获取底层 ClaudeEngine 实例
-   * 用途：供 CronExecutor 注入 ClaudeEngineBridge，
-   *       使 IterationChecker 能通过 sendMessage 派发 SubAgent
-   */
-  getClaudeEngine(): ClaudeEngine {
-    return this.claudeEngine
   }
 }
 
