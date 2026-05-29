@@ -891,9 +891,9 @@ ${originalContent}
           // 🔧 修复：完成前将本地图片路径/URL 转为飞书 image_key
           // 流式过程中图片显示为占位符，此处统一处理后再渲染最终卡片
           const processed = await this.feishuService.processContentWithImages(fullResponse);
-          if (processed.imageKeys.length > 0) {
-            let finalText = processed.processedText;
+          let finalText = processed.processedText;
 
+          if (processed.imageKeys.length > 0) {
             // 飞书卡片 markdown 不支持 ![alt](img_key) 渲染图片。
             // 需要: 1) 从正文中移除 ![](img_key) 语法
             //        2) 将 img_key 注册为独立的 img 元素块
@@ -904,12 +904,27 @@ ${originalContent}
               // 注册为 img 元素块（卡片中独立渲染）
               renderer.registerImage(key, 'image');
             }
-
-            renderer.replaceContentText(finalText.trim());
-            fullResponse = finalText.trim();
           }
+
+          // 上传失败的图片：降级为文本链接 📎 [alt](url)，避免飞书显示裂图
           if (processed.errors.length > 0) {
             console.warn('⚠️ 部分图片上传失败:', processed.errors);
+            for (const err of processed.errors) {
+              // err 格式: "Upload failed: <raw> - <reason>"
+              const m = err.match(/^Upload failed:\s+(.+?)\s+-\s+/);
+              if (!m) continue;
+              const failedRaw = m[1]!;
+              const escaped = failedRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              // 1) 优先处理 markdown 图片语法（含可选的 <> 包裹）
+              const mdRe = new RegExp(`!\\[([^\\]]*)\\]\\(<?${escaped}>?\\)`, 'g');
+              finalText = finalText.replace(mdRe, (_full, alt) => `📎 [${alt || '图片'}](${failedRaw})`);
+              // 2) 兜底：裸 URL 形态原样保留即可（用户点击仍可访问）
+            }
+          }
+
+          if (processed.imageKeys.length > 0 || processed.errors.length > 0) {
+            renderer.replaceContentText(finalText.trim());
+            fullResponse = finalText.trim();
           }
 
           await renderer.onComplete();

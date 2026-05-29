@@ -17,6 +17,7 @@ import { IdentityResolver } from './identity-resolver.js';
 import { parseMentions, isBotMentioned as checkBotMentioned } from './mention-utils.js';
 import { extractImageCandidates, type ImageCandidate } from './image-extractor.js';
 import { probeRemoteImage, probeLocalImage, isFeishuSupportedMime } from './image-probe.js';
+import { guardMarkdownTables } from './markdown-table-guard.js';
 
 // AI 修复重试配置
 const AI_FIX_MAX_RETRIES = 2; // AI 修复最大重试次数
@@ -925,7 +926,8 @@ export class FeishuService implements FeishuConnection {
     let bodyStartIdx = 0;
 
     const body = lines.slice(bodyStartIdx).join('\n').trim();
-    const contentToRender = body || text.trim();
+    // 飞书 markdown 表格列数 > 5 会渲染失败，超列表格降级为列表形式
+    const contentToRender = guardMarkdownTables(body || text.trim());
 
     return JSON.stringify({
       "schema": "2.0",

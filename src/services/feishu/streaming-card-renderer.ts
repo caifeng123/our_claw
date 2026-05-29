@@ -34,6 +34,7 @@
  *   - 卡片 JSON 大小上限: 30KB
  */
 
+import { guardMarkdownTables } from './markdown-table-guard.js'
 
 // ==================== Types ====================
 
@@ -499,6 +500,9 @@ export class StreamingCardRenderer {
           '🖼️ [$1]($2)'
         )
       }
+
+      // 飞书 markdown 表格列数 > 5 会渲染失败，超列表格降级为列表形式（0 信息损失）
+      content = guardMarkdownTables(content)
 
       if (isFinished && this.mentionUserId) {
         content = `<at id=${this.mentionUserId}></at> ` + content
